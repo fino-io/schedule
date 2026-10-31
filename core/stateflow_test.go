@@ -63,7 +63,7 @@ func TestIndependentStateflow(t *testing.T) {
 
 func TestStateflowBoundaries(t *testing.T) {
 	for _, definition := range []*pb.StateflowDefinition{
-		nil, {}, {Init: "start", Steps: []*pb.StateflowStep{nil}},
+		nil, {}, {Init: "\xff"}, {Init: "start", Steps: []*pb.StateflowStep{nil}},
 		{Init: "start", Steps: []*pb.StateflowStep{{From: "start"}}},
 		{Init: "start", Steps: []*pb.StateflowStep{{From: "start", To: "end"}, {From: "start", To: "end"}}},
 	} {

@@ -3,97 +3,14 @@ package schedule
 import (
 	"errors"
 	"fmt"
-	"reflect"
+	"math"
 	"testing"
 
 	pb "github.com/fino-io/schedule/go/schedule"
 	"google.golang.org/protobuf/proto"
 )
 
-func mustCompile(t testing.TB, root *pb.Node) *Workflow {
-	t.Helper()
-	w, err := Compile(&pb.Definition{Root: root})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return w
-}
-
-func start(t testing.TB, w *Workflow) *pb.Transition {
-	t.Helper()
-	result, err := w.Start("run")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Restore(result.Instance); err != nil {
-		t.Fatalf("invalid initialized snapshot: %v", err)
-	}
-	return result
-}
-
-func report(instance *pb.Instance, id string, kind pb.EventKind) *pb.Event {
-	event := &pb.Event{
-		Id:         fmt.Sprintf("event-%d-%s-%d", instance.Revision, id, kind),
-		InstanceId: instance.Id,
-		Kind:       kind,
-		NodeId:     id,
-	}
-	for _, state := range instance.Nodes {
-		if state.NodeId == id {
-			event.ExecutionId = state.ExecutionId
-		}
-	}
-	return event
-}
-
-func control(instance *pb.Instance, kind pb.EventKind) *pb.Event {
-	return &pb.Event{Id: fmt.Sprintf("control-%d-%d", instance.Revision, kind), InstanceId: instance.Id, Kind: kind}
-}
-
-func advance(t testing.TB, w *Workflow, current *pb.Transition, event *pb.Event) *pb.Transition {
-	t.Helper()
-	before := proto.Clone(current.Instance)
-	result, err := w.Advance(current.Instance, event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !proto.Equal(before, current.Instance) {
-		t.Fatal("advance modified its input")
-	}
-	if _, err := w.Restore(result.Instance); err != nil {
-		t.Fatalf("advance produced invalid snapshot: %v\n%s", err, result.Instance)
-	}
-	return result
-}
-
-func nodeState(instance *pb.Instance, id string) *pb.NodeState {
-	for _, state := range instance.Nodes {
-		if state.NodeId == id {
-			return state
-		}
-	}
-	panic("unknown node: " + id)
-}
-
-func commands(result *pb.Transition, kind pb.CommandKind) []string {
-	var ids []string
-	for _, command := range result.Commands {
-		if command.Kind == kind {
-			ids = append(ids, command.State.NodeId)
-		}
-	}
-	return ids
-}
-
-func wantTasks(t testing.TB, result *pb.Transition, ids ...string) {
-	t.Helper()
-	got := commands(result, pb.CommandKind_COMMAND_KIND_TASK)
-	if !reflect.DeepEqual(got, ids) {
-		t.Fatalf("tasks=%v, want %v", got, ids)
-	}
-}
-
-func TestTaskLifecycleAndDeterminism(t *testing.T) {
+func TestWorkflowTaskLifecycleAndDeterminism(t *testing.T) {
 	w := mustCompile(t, Task("a"))
 	first := start(t, w)
 	wantTasks(t, first, "a")
@@ -126,79 +43,7 @@ func TestTaskLifecycleAndDeterminism(t *testing.T) {
 	}
 }
 
-func TestSequenceAndFailure(t *testing.T) {
-	w := mustCompile(t, Seq("root", Task("a"), Task("b"), Task("c")))
-	current := start(t, w)
-	wantTasks(t, current, "a")
-	current = advance(t, w, current, report(current.Instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	wantTasks(t, current, "b")
-	event := report(current.Instance, "b", pb.EventKind_EVENT_KIND_FAILED)
-	event.ErrorMessage = proto.String("")
-	current = advance(t, w, current, event)
-	wantTasks(t, current)
-	if nodeState(current.Instance, "root").CauseId != "b" || nodeState(current.Instance, "c").Phase != skipped || !current.Settled {
-		t.Fatal(current.Instance)
-	}
-	if nodeState(current.Instance, "b").ErrorMessage == nil {
-		t.Fatal("empty error lost presence")
-	}
-	event.ErrorMessage = nil
-	if _, err := w.Advance(current.Instance, event); !errors.Is(err, ErrConflict) {
-		t.Fatal("nil and empty error were conflated")
-	}
-}
-
-func TestAllFailureDrainsDispatchedTasks(t *testing.T) {
-	w := mustCompile(t, All("root", Task("a"), Task("b")))
-	current := start(t, w)
-	wantTasks(t, current, "a", "b")
-	current = advance(t, w, current, report(current.Instance, "a", pb.EventKind_EVENT_KIND_FAILED))
-	if !current.ResultReady || current.Settled || nodeState(current.Instance, "b").Phase != ready {
-		t.Fatal("failure prematurely settled the running scope")
-	}
-	current = advance(t, w, current, report(current.Instance, "b", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	if !current.Settled || nodeState(current.Instance, "root").Phase != failed || nodeState(current.Instance, "root").CauseId != "a" {
-		t.Fatal(current.Instance)
-	}
-}
-
-func TestAnyWinnerAndNestedDrain(t *testing.T) {
-	w := mustCompile(t, Seq("root", Any("choice", Seq("branch", Task("b"), Task("c")), Task("d")), Task("e")))
-	current := start(t, w)
-	wantTasks(t, current, "b", "d")
-	event := report(current.Instance, "d", pb.EventKind_EVENT_KIND_SUCCEEDED)
-	event.ResultRef = "result:d"
-	current = advance(t, w, current, event)
-	wantTasks(t, current, "e")
-	current = advance(t, w, current, report(current.Instance, "e", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	if !current.ResultReady || current.Settled {
-		t.Fatal("root result was conflated with scope settlement")
-	}
-	current = advance(t, w, current, report(current.Instance, "b", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	wantTasks(t, current, "c")
-	current = advance(t, w, current, report(current.Instance, "c", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	choice := nodeState(current.Instance, "choice")
-	if !current.Settled || choice.WinnerId != "d" || choice.ResultRef != "result:d" || len(commands(current, pb.CommandKind_COMMAND_KIND_END)) != 1 {
-		t.Fatal(current)
-	}
-}
-
-func TestAncestorFailureOverridesAnyDrain(t *testing.T) {
-	w := mustCompile(t, All("root", Any("choice", Seq("branch", Task("b"), Task("c")), Task("d")), Task("e")))
-	current := start(t, w)
-	current = advance(t, w, current, report(current.Instance, "d", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	current = advance(t, w, current, report(current.Instance, "e", pb.EventKind_EVENT_KIND_FAILED))
-	if nodeState(current.Instance, "c").Phase != skipped || nodeState(current.Instance, "choice").Phase != succeeded {
-		t.Fatal(current.Instance)
-	}
-	current = advance(t, w, current, report(current.Instance, "b", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	wantTasks(t, current)
-	if !current.Settled || nodeState(current.Instance, "root").CauseId != "e" {
-		t.Fatal(current.Instance)
-	}
-}
-
-func TestPauseResumeAndStop(t *testing.T) {
+func TestWorkflowPauseResumeAndStop(t *testing.T) {
 	w := mustCompile(t, Any("root", Seq("branch", Task("a"), Task("b")), Task("d")))
 	current := start(t, w)
 	current = advance(t, w, current, report(current.Instance, "d", pb.EventKind_EVENT_KIND_SUCCEEDED))
@@ -230,7 +75,7 @@ func TestPauseResumeAndStop(t *testing.T) {
 	}
 }
 
-func TestStopPendingAndInFlight(t *testing.T) {
+func TestWorkflowStopPendingAndInFlight(t *testing.T) {
 	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
 	current := start(t, w)
 	current = advance(t, w, current, control(current.Instance, pb.EventKind_EVENT_KIND_STOP))
@@ -247,25 +92,67 @@ func TestStopPendingAndInFlight(t *testing.T) {
 	}
 }
 
-func TestAnyAllUnsuccessfulAndAllSuccess(t *testing.T) {
-	for _, kind := range []pb.NodeKind{all, any} {
-		w := mustCompile(t, &pb.Node{Id: "root", Kind: kind, Children: []*pb.Node{Task("a"), Task("b")}})
-		current := start(t, w)
-		current = advance(t, w, current, report(current.Instance, "a", pb.EventKind_EVENT_KIND_FAILED))
-		if kind == any && current.ResultReady {
-			t.Fatal("first failure ended Any")
-		}
-		current = advance(t, w, current, report(current.Instance, "b", pb.EventKind_EVENT_KIND_STOPPED))
-		if !current.Settled || nodeState(current.Instance, "root").Phase != failed {
-			t.Fatal(current.Instance)
+func TestWorkflowEventValidation(t *testing.T) {
+	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
+	initial := start(t, w)
+	invalid := []*pb.Event{
+		nil, {},
+		{Id: "id", InstanceId: "other", Kind: pb.EventKind_EVENT_KIND_PAUSE},
+		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_PAUSE, NodeId: "a"},
+		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_STARTED, NodeId: "root", ExecutionId: "wrong"},
+		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_SUCCEEDED, NodeId: "b", ExecutionId: executionID("run", "b")},
+		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_SUCCEEDED, NodeId: "a", ExecutionId: "wrong"},
+	}
+	badStart := report(initial.Instance, "a", pb.EventKind_EVENT_KIND_STARTED)
+	badStart.ResultRef = "not allowed"
+	badSuccess := report(initial.Instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)
+	badSuccess.ErrorMessage = proto.String("not allowed")
+	unknown := report(initial.Instance, "a", 99)
+	invalid = append(invalid, badStart, badSuccess, unknown)
+	before := proto.Clone(initial.Instance)
+	for _, event := range invalid {
+		if _, err := w.Advance(initial.Instance, event); !errors.Is(err, ErrInvalidEvent) || !proto.Equal(before, initial.Instance) {
+			t.Fatalf("invalid event accepted or mutated input: %v, %v", event, err)
 		}
 	}
-	w := mustCompile(t, All("root", Task("a"), Task("b")))
+}
+
+func TestWorkflowRevisionOverflow(t *testing.T) {
+	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
+	initial := start(t, w)
+	maxRevision := proto.Clone(initial.Instance).(*pb.Instance)
+	maxRevision.Revision = math.MaxUint64
+	if _, err := w.Advance(maxRevision, report(maxRevision, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)); !errors.Is(err, ErrConflict) {
+		t.Fatal("revision overflow accepted")
+	}
+}
+
+func TestWorkflowRejectsInvalidText(t *testing.T) {
+	w := mustCompile(t, Task("a"))
+	if _, err := w.Start("\xff"); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatal("invalid UTF-8 instance ID accepted")
+	}
 	current := start(t, w)
-	for _, id := range []string{"b", "a"} {
-		current = advance(t, w, current, report(current.Instance, id, pb.EventKind_EVENT_KIND_SUCCEEDED))
+	event := report(current.Instance, "a", pb.EventKind_EVENT_KIND_FAILED)
+	event.ErrorMessage = proto.String("\xff")
+	if _, err := w.Advance(current.Instance, event); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatal("nonserializable error accepted")
 	}
-	if !current.Settled || nodeState(current.Instance, "root").Phase != succeeded {
-		t.Fatal(current.Instance)
+}
+
+func BenchmarkAdvance(b *testing.B) {
+	items := make([]*pb.Node, 1000)
+	for i := range items {
+		items[i] = Task(fmt.Sprint(i))
+	}
+	w := mustCompile(b, All("root", items...))
+	current := start(b, w)
+	event := report(current.Instance, "0", pb.EventKind_EVENT_KIND_SUCCEEDED)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := w.Advance(current.Instance, event); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

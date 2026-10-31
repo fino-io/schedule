@@ -2,7 +2,6 @@ package schedule
 
 import (
 	"errors"
-	"math"
 	"testing"
 
 	pb "github.com/fino-io/schedule/go/schedule"
@@ -49,39 +48,9 @@ func TestSnapshotIntegrity(t *testing.T) {
 	if _, err := other.Restore(initial.Instance); !errors.Is(err, ErrInvalidSnapshot) {
 		t.Fatal("different definition accepted")
 	}
-	maxRevision := proto.Clone(initial.Instance).(*pb.Instance)
-	maxRevision.Revision = math.MaxUint64
-	if _, err := w.Advance(maxRevision, report(maxRevision, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)); !errors.Is(err, ErrConflict) {
-		t.Fatal("revision overflow accepted")
-	}
 }
 
-func TestEventValidation(t *testing.T) {
-	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
-	initial := start(t, w)
-	invalid := []*pb.Event{
-		nil, {},
-		{Id: "id", InstanceId: "other", Kind: pb.EventKind_EVENT_KIND_PAUSE},
-		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_PAUSE, NodeId: "a"},
-		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_STARTED, NodeId: "root", ExecutionId: "wrong"},
-		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_SUCCEEDED, NodeId: "b", ExecutionId: executionID("run", "b")},
-		{Id: "id", InstanceId: "run", Kind: pb.EventKind_EVENT_KIND_SUCCEEDED, NodeId: "a", ExecutionId: "wrong"},
-	}
-	badStart := report(initial.Instance, "a", pb.EventKind_EVENT_KIND_STARTED)
-	badStart.ResultRef = "not allowed"
-	badSuccess := report(initial.Instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)
-	badSuccess.ErrorMessage = proto.String("not allowed")
-	unknown := report(initial.Instance, "a", 99)
-	invalid = append(invalid, badStart, badSuccess, unknown)
-	before := proto.Clone(initial.Instance)
-	for _, event := range invalid {
-		if _, err := w.Advance(initial.Instance, event); !errors.Is(err, ErrInvalidEvent) || !proto.Equal(before, initial.Instance) {
-			t.Fatalf("invalid event accepted or mutated input: %v, %v", event, err)
-		}
-	}
-}
-
-func TestSerializationAndReplay(t *testing.T) {
+func TestSnapshotSerializationAndReplay(t *testing.T) {
 	w := mustCompile(t, Any("root", Seq("branch", Task("a"), Task("b")), Task("d")))
 	current := start(t, w)
 	var events []*pb.Event
@@ -119,7 +88,7 @@ func TestSerializationAndReplay(t *testing.T) {
 	}
 }
 
-func TestAnyWinnerSnapshot(t *testing.T) {
+func TestSnapshotAnyWinner(t *testing.T) {
 	w := mustCompile(t, Any("root", Task("a"), Task("b")))
 	current := start(t, w)
 	current = advance(t, w, current, report(current.Instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED))
@@ -129,21 +98,5 @@ func TestAnyWinnerSnapshot(t *testing.T) {
 		if _, err := w.Restore(copy); !errors.Is(err, ErrInvalidSnapshot) {
 			t.Fatal("invalid winner accepted")
 		}
-	}
-}
-
-func TestWireTextMustBeSerializable(t *testing.T) {
-	w := mustCompile(t, Task("a"))
-	if _, err := w.Start("\xff"); !errors.Is(err, ErrInvalidEvent) {
-		t.Fatal("invalid UTF-8 instance ID accepted")
-	}
-	current := start(t, w)
-	event := report(current.Instance, "a", pb.EventKind_EVENT_KIND_FAILED)
-	event.ErrorMessage = proto.String("\xff")
-	if _, err := w.Advance(current.Instance, event); !errors.Is(err, ErrInvalidEvent) {
-		t.Fatal("nonserializable error accepted")
-	}
-	if _, err := CompileStateflow(&pb.StateflowDefinition{Init: "\xff"}); !errors.Is(err, ErrInvalidDefinition) {
-		t.Fatal("nonserializable state name accepted")
 	}
 }

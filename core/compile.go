@@ -27,22 +27,22 @@ type Workflow struct {
 
 func Compile(definition *pb.Definition) (*Workflow, error) {
 	ids := make(map[string]bool)
-	seen := make(map[*pb.Node]bool)
 	var validate func(*pb.Node, int) error
 	validate = func(node *pb.Node, depth int) error {
 		if node == nil || node.Id == "" {
 			return fmt.Errorf("%w: node and ID are required", ErrInvalidDefinition)
 		}
-		if depth > maxDepth || len(seen) >= maxNodes {
+		if depth > maxDepth || len(ids) >= maxNodes {
 			return fmt.Errorf("%w: tree exceeds depth %d or node count %d", ErrInvalidDefinition, maxDepth, maxNodes)
 		}
-		if seen[node] || ids[node.Id] {
+		// 共享节点和循环都会再次遇到同一个 ID，无须单独维护指针集合。
+		if ids[node.Id] {
 			return fmt.Errorf("%w: shared, cyclic or duplicate node %q", ErrInvalidDefinition, node.Id)
 		}
 		if node.Kind < task || node.Kind > any || (node.Kind == task) != (len(node.Children) == 0) {
 			return fmt.Errorf("%w: invalid kind or children of %q", ErrInvalidDefinition, node.Id)
 		}
-		seen[node], ids[node.Id] = true, true
+		ids[node.Id] = true
 		for _, child := range node.Children {
 			if err := validate(child, depth+1); err != nil {
 				return err
@@ -56,7 +56,7 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 
 	w := &Workflow{
 		definition: proto.Clone(definition).(*pb.Definition),
-		byID:       make(map[string]int, len(seen)),
+		byID:       make(map[string]int, len(ids)),
 	}
 	data, err := (proto.MarshalOptions{Deterministic: true}).Marshal(w.definition)
 	if err != nil {

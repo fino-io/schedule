@@ -51,16 +51,13 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 		if settled(instance) {
 			return nil, fmt.Errorf("%w: instance is settled", ErrConflict)
 		}
+		if next.Mode == modeStopped && event.Kind != pb.EventKind_EVENT_KIND_STOP {
+			return nil, fmt.Errorf("%w: stopped instance cannot pause or resume", ErrConflict)
+		}
 		switch event.Kind {
 		case pb.EventKind_EVENT_KIND_PAUSE:
-			if next.Mode == modeStopped {
-				return nil, fmt.Errorf("%w: stopped instance cannot pause", ErrConflict)
-			}
 			next.Mode = modePaused
 		case pb.EventKind_EVENT_KIND_RESUME:
-			if next.Mode == modeStopped {
-				return nil, fmt.Errorf("%w: stopped instance cannot resume", ErrConflict)
-			}
 			next.Mode = modeRunning
 		case pb.EventKind_EVENT_KIND_STOP:
 			next.Mode = modeStopped

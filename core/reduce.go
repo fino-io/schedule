@@ -40,18 +40,11 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		if blocker == "" && (state.Phase == failed || state.Phase == stopped) {
 			blocker = node.Id
 		}
-		current := -1
-		if node.Kind == seq {
-			for _, child := range w.children[i] {
-				if instance.Nodes[child].Phase != succeeded {
-					current = child
-					break
-				}
-			}
-		}
+		prefixSucceeded := true
 		for _, child := range w.children[i] {
-			childActive := instance.Nodes[child].Phase != pending
-			canActivate := node.Kind != seq || child == current || childActive
+			phase := instance.Nodes[child].Phase
+			canActivate := node.Kind != seq || prefixSucceeded || phase != pending
+			prefixSucceeded = prefixSucceeded && phase == succeeded
 			visit(child, allowed && canActivate, blocker)
 		}
 		w.resolve(instance, i, -1)

@@ -10,9 +10,7 @@ import (
 // Stateflow 仅索引独立业务状态流；实例只使用生成结构体，不维护第二份机器状态。
 type Stateflow struct {
 	definition *pb.StateflowDefinition
-	steps      map[[2]string]*pb.StateflowStep
-	states     map[string]bool
-	outgoing   map[string]bool
+	steps      map[string]map[string]*pb.StateflowStep
 }
 
 func CompileStateflow(definition *pb.StateflowDefinition) (*Stateflow, error) {
@@ -21,21 +19,21 @@ func CompileStateflow(definition *pb.StateflowDefinition) (*Stateflow, error) {
 	}
 	flow := &Stateflow{
 		definition: proto.Clone(definition).(*pb.StateflowDefinition),
-		steps:      make(map[[2]string]*pb.StateflowStep),
-		states:     map[string]bool{definition.Init: true},
-		outgoing:   make(map[string]bool),
+		steps:      map[string]map[string]*pb.StateflowStep{definition.Init: {}},
 	}
 	for _, step := range flow.definition.Steps {
 		if step == nil || step.From == "" || step.To == "" || !validText(step.From, step.To, step.Event) {
 			return nil, fmt.Errorf("%w: transition endpoints are required", ErrInvalidDefinition)
 		}
-		key := [2]string{step.From, step.To}
-		if _, exists := flow.steps[key]; exists {
+		for _, state := range []string{step.From, step.To} {
+			if flow.steps[state] == nil {
+				flow.steps[state] = make(map[string]*pb.StateflowStep)
+			}
+		}
+		if flow.steps[step.From][step.To] != nil {
 			return nil, fmt.Errorf("%w: duplicate transition %q -> %q", ErrInvalidDefinition, step.From, step.To)
 		}
-		flow.steps[key] = step
-		flow.states[step.From], flow.states[step.To] = true, true
-		flow.outgoing[step.From] = true
+		flow.steps[step.From][step.To] = step
 	}
 	return flow, nil
 }
@@ -48,7 +46,7 @@ func (f *Stateflow) Start() *pb.StateflowInstance {
 }
 
 func (f *Stateflow) Restore(instance *pb.StateflowInstance) (*pb.StateflowInstance, error) {
-	if instance == nil || !proto.Equal(instance.Definition, f.definition) || !f.states[instance.State] {
+	if instance == nil || !proto.Equal(instance.Definition, f.definition) || f.steps[instance.State] == nil {
 		return nil, fmt.Errorf("%w: stateflow definition or state does not match", ErrInvalidSnapshot)
 	}
 	return proto.Clone(instance).(*pb.StateflowInstance), nil
@@ -60,8 +58,8 @@ func (f *Stateflow) Advance(instance *pb.StateflowInstance, target string) (*pb.
 	if err != nil {
 		return nil, nil, err
 	}
-	step, exists := f.steps[[2]string{instance.State, target}]
-	if !exists {
+	step := f.steps[instance.State][target]
+	if step == nil {
 		return nil, nil, fmt.Errorf("%w: cannot transition from %q to %q", ErrInvalidEvent, instance.State, target)
 	}
 	next.State = target
@@ -69,8 +67,9 @@ func (f *Stateflow) Advance(instance *pb.StateflowInstance, target string) (*pb.
 }
 
 func (f *Stateflow) HasNext(state string) (bool, error) {
-	if !f.states[state] {
+	steps, exists := f.steps[state]
+	if !exists {
 		return false, fmt.Errorf("%w: state %q", ErrNotFound, state)
 	}
-	return f.outgoing[state], nil
+	return len(steps) > 0, nil
 }
