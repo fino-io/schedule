@@ -2,6 +2,12 @@
 
 基于 Fino proto 契约的 Go 任务编排基础库，由 `chaos-io/schedule` 重构而来。业务结构直接使用生成类型，不额外维护另一套任务、配置和状态 DTO。
 
+## 架构设计
+
+后续重构遵循[架构设计](docs/architecture.md)：用任务树表达组合，用固定执行生命周期和纯事件推进器计算下一步，并区分结果确定与全部收尾。文档明确了执行规则、恢复与分派协议，以及成熟项目的取舍。
+
+该文档是目标架构，完整推进器尚未实现。以下示例与说明描述当前代码行为。
+
 ## 目录
 
 | 目录 | 内容 |
@@ -9,7 +15,8 @@
 | `proto/schedule/` | 任务定义、状态流、运行快照和事件的契约源 |
 | `go/schedule/` | Fino 生成的 Go 类型，属于独立的 API 模块，不手工修改 |
 | `core/` | 项目维护的任务构建、校验、任务展开、路径查找、状态机和回调接口 |
-| `docs/`、`openapi/` | Fino 生成的契约文档及 JSON Schema |
+| `docs/architecture.md` | 项目维护的目标架构与实施约定 |
+| `docs/schedule/`、`openapi/` | Fino 生成的契约文档及 JSON Schema |
 
 根 Go 模块通过 `replace github.com/fino-io/schedule/go => ./go` 使用同仓库生成类型。本地修改契约后不必先发布 API 模块；其他仓库使用时须先发布对应版本的 API 模块，或在自己的工作区关联本地模块。
 
@@ -75,7 +82,7 @@ restored, err := schedule.RestoreStateflow(saved)
 
 原 `Scheduler` 的 `OnTask/OnState/OnEnd` 仍是 Go 接口，保留 `context.Context` 和 `error` 返回。回调参数改用生成的任务定义和运行快照：元数据从任务定义读取，节点状态从快照读取；实现方持有对应的工作流定义。节点的 `error_message` 只保存文本及存在性，不能恢复 Go 错误类型或错误链，实际 `error` 仍由调用方持有和处理。
 
-原库没有实现调度循环、串行完成后的自动推进、并行结果汇总或回调驱动。本次迁移其已有能力，未自行加入这些算法。`WorkflowTransition`、`WorkItemEvent`、`StateChange` 等类型为后续实现准备；`Start` 的输出也不会自动调用回调。串行失败后的策略、业务成功/失败与自定义状态的映射、回调失败的处理仍由实际执行系统明确。
+原库没有实现调度循环、串行完成后的自动推进、并行结果汇总或回调驱动。当前代码只迁移其已有能力，尚未加入这些算法。`WorkflowTransition`、`WorkItemEvent`、`StateChange` 等类型为后续实现准备；`Start` 的输出也不会自动调用回调。后续完整推进规则及其与执行系统的边界以[架构设计](docs/architecture.md)为准。
 
 原 `SkipBranchError`、`Master` 只声明了字段，没有执行行为；当前保留其数据，不推测它们的作用。并行任一成功的规则来自原 README；“提前成功后其他已启动分支继续执行”属于契约中标明的后续补充约定，尚无执行器实现。未迁移原库中未使用的 tracing 函数及 Redis 读取示例测试。
 
