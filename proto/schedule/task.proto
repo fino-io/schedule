@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package schedule;
+
+import "fino/options.proto";
+
+option go_package = "github.com/fino-io/schedule/go/schedule;schedule";
+
+// 任务树的不可变定义；执行状态单独保存在运行快照中。
+// 每个节点必须选择一种任务结构，节点 ID 在整棵树内唯一。
+// ID 沿用调用方提供的业务标识，不要求 UUID；公共字段保留原任务元数据。
+message WorkItemDefinition {
+  string id = 1 [(fino.validate) = {required: true}];
+  string name = 2;
+  string type = 3;
+  string entity_id = 4;
+  string operation_name = 5;
+
+  // oneof 本身不保证必填，校验任务树时还需检查结构非空、深度和节点数量。
+  oneof task {
+    SimpleTaskDefinition simple_task = 10;
+    SequenceTaskDefinition sequence_task = 11;
+    ParallelTaskDefinition parallel_task = 12;
+  }
+}
+
+// 叶子任务；具体执行由调用方根据 type、entity_id、operation_name 分派。
+message SimpleTaskDefinition {}
+
+// 子节点可以继续嵌套串行或并行任务；items 必须非空且不包含空节点。
+// 按声明顺序执行，当前子节点 finished 后才启动下一项；失败则串行节点失败。
+message SequenceTaskDefinition {
+  repeated WorkItemDefinition items = 1 [(fino.validate) = {required: true min: 1}];
+}
+
+// 同时启动各分支，沿用原 README 的规则：任一分支 finished 即整体成功。
+// 全部分支 failed 时整体失败；成功后其他已启动分支继续执行，不隐式取消。
+message ParallelTaskDefinition {
+  repeated WorkItemDefinition items = 1 [(fino.validate) = {required: true min: 1}];
+
+  // 保留原 SkipBranchError 数据；源实现没有消费此字段，暂不改变汇总规则。
+  bool skip_branch_error = 2;
+  // 保留原 Master 数据；源实现未定义其语义，暂不用于选择分支或决定成功。
+  string master = 3;
+}

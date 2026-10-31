@@ -2,62 +2,120 @@ syntax = "proto3";
 
 package schedule.v1;
 
-import "schedule/resource.proto";
 import "fino/options.proto";
-import "fino/core/null.proto";
-import "google/api/annotations.proto";
-import "google/protobuf/field_mask.proto";
+import "schedule/stateflow.proto";
+import "schedule/task.proto";
 
 option go_package = "github.com/fino-io/schedule/go/schedule/v1;schedule";
 
-// 参考 CRUD；替换为业务 RPC 时一并清理 Resource 模型、参数和 import。
+// 无状态任务编排契约，供生成 Go API 后由库逻辑实现；不绑定 HTTP 或数据库。
+// 定义和快照由调用方持有，持久化、并发控制、实际执行及回调投递由调用方负责。
+// 不引入定时触发、Worker 领取、租约和重试，便于接入已有执行系统。
 service ScheduleService {
-  rpc GetResource(GetResourceRequest) returns (Resource) {
-    option (google.api.http) = {get: "/schedule/v1/resources/{id}"};
-  }
+  // 校验整棵任务树及状态流；失败返回 INVALID_ARGUMENT，不返回部分有效的定义。
+  rpc ValidateWorkflow(ValidateWorkflowRequest) returns (ValidateWorkflowResponse);
 
-  rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse) {
-    option (google.api.http) = {get: "/schedule/v1/resources"};
-  }
+  // 创建独立快照并计算首批叶子任务；不修改定义，也不执行任务或调用外部回调。
+  rpc StartWorkflow(StartWorkflowRequest) returns (StartWorkflowResponse);
 
-  rpc CreateResource(CreateResourceRequest) returns (Resource) {
-    option (google.api.http) = {post: "/schedule/v1/resources" body: "resource"};
-  }
-
-  rpc UpdateResource(UpdateResourceRequest) returns (Resource) {
-    option (google.api.http) = {patch: "/schedule/v1/resources/{resource.id}" body: "resource"};
-  }
-
-  rpc DeleteResource(DeleteResourceRequest) returns (fino.core.Null) {
-    option (google.api.http) = {delete: "/schedule/v1/resources/{id}"};
-  }
+  // 应用一个状态报告，推进串并行父节点，返回新增任务及状态变化。
+  // 相同定义、快照和事件必须得到相同结果；失败不返回部分推进的快照。
+  rpc AdvanceWorkflow(AdvanceWorkflowRequest) returns (AdvanceWorkflowResponse);
 }
 
-message GetResourceRequest {
-  string id = 1 [(fino.validate) = {required: true max: 128}];
+message ValidateWorkflowRequest {
+  WorkflowInput workflow = 1 [(fino.validate) = {required: true}];
 }
 
-message ListResourcesRequest {
-  int32 page_size = 90;
-  string page_token = 91;
+// 没有校验错误即成功；具体字段和结构错误由 RPC 错误返回。
+message ValidateWorkflowResponse {}
+
+// 定义与运行数据分离，同一定义可启动多个互不共享状态的实例。
+// 实例整个生命周期必须绑定启动时的同一份定义，由调用方保证不被替换或修改。
+// 不作为持久化模型，亦不使用 fino.model 生成存储层。
+message WorkflowInput {
+  WorkItemDefinition root = 1 [(fino.validate) = {required: true}];
+
+  // 未提供时沿用原 flow.yaml：init=created；created -> running；
+  // running -> failed/stopped/finished/paused，后四条转换的 event 与目标状态同名。
+  // 编排使用 running/finished/failed 表示执行中/成功/失败；自定义状态保留原名，
+  // 按 steps 校验，不自动推断为成功或失败。启动路径必须允许 init -> running，
+  // 正常完成路径必须允许 running -> finished 和 running -> failed。
+  StateflowDefinition stateflow = 2;
 }
 
-message ListResourcesResponse {
-  repeated Resource resources = 1;
-
-  string next_page_token = 93;
+message StartWorkflowRequest {
+  WorkflowInput workflow = 1 [(fino.validate) = {required: true}];
 }
 
-message CreateResourceRequest {
-  Resource resource = 1 [(fino.validate) = {required: true}];
+message StartWorkflowResponse {
+  WorkflowTransitionView transition = 1;
 }
 
-message UpdateResourceRequest {
-  Resource resource = 1 [(fino.validate) = {required: true}];
-
-  google.protobuf.FieldMask update_mask = 80;
+// 启动时为全部节点创建 init 状态；进入执行范围的组合节点及叶子转为 running。
+// 串行只激活首个子节点，并行激活全部分支，ready_tasks 只包含本次新激活的叶子。
+// 快照必须与请求定义匹配，每个定义节点恰好对应一项，不接受未知或重复节点。
+// items 按定义树的前序顺序输出。
+message WorkflowInstanceView {
+  repeated WorkItemStateView items = 1;
 }
 
-message DeleteResourceRequest {
-  string id = 1 [(fino.validate) = {required: true}];
+message WorkItemStateView {
+  string node_id = 1;
+  string state = 2;
+  // Go error 不进入线协议，只保留可传输的错误摘要；不序列化底层错误对象。
+  string error_message = 3;
+  // 进入过执行范围后保持 true，避免状态流回到 init 时重复分派任务。
+  bool activated = 4;
+  // 对应 Stateflow.HasNext；从定义的出边推导，IsDone 为其取反。
+  bool has_next = 5;
+}
+
+// OnTask、OnState、OnEnd 改为显式结果，由调用方在接受新快照后处理。
+// 待执行任务按任务树声明顺序输出；启动变化按父到子的激活顺序输出，
+// 推进变化先输出报告节点，再按子到父传播，最后输出新激活节点，顺序保持确定。
+message WorkflowTransitionView {
+  WorkflowInstanceView instance = 1;
+  repeated ReadyTaskView ready_tasks = 2;
+  repeated StateChangeView state_changes = 3;
+  // 仅在本次根节点首次进入无出边状态时为 true，对应 OnEnd。
+  // 不表示其他已启动的并行分支已停止；后续分支报告不得重复产生结束通知。
+  bool ended = 4;
+}
+
+// 对应 OnTask；通过 node_id 取得叶子定义和业务元数据。
+message ReadyTaskView {
+  string node_id = 1;
+  // 对应 FindPath，依次包含根节点至当前叶子的 ID，含首尾。
+  repeated string path = 2;
+}
+
+// 对应 OnState；每次合法转换产生一项，包括自动推进的组合节点。
+message StateChangeView {
+  string node_id = 1;
+  string from = 2;
+  string to = 3;
+  string event = 4;
+  string error_message = 5;
+}
+
+message AdvanceWorkflowRequest {
+  WorkflowInput workflow = 1 [(fino.validate) = {required: true}];
+  WorkflowInstanceView instance = 2 [(fino.validate) = {required: true}];
+  WorkItemEventInput event = 3 [(fino.validate) = {required: true}];
+}
+
+// 任务状态报告或显式控制转换，沿用 Stateflow.Goto 的目标状态语义。
+// 只接受已激活节点的报告，不能以状态报告绕过串行顺序启动后续节点。
+// 自定义、暂停及停止转换只更新指定节点，不隐式取消外部任务或发明恢复规则。
+message WorkItemEventInput {
+  string node_id = 1 [(fino.validate) = {required: true}];
+  string state = 2 [(fino.validate) = {required: true}];
+  string error_message = 3;
+}
+
+message AdvanceWorkflowResponse {
+  // 与已接受状态及错误摘要完全相同的重复报告返回原快照和空变化，ended=false。
+  // 其余报告必须匹配状态流的合法转换；已结束祖先不再转换，但仍记录在途分支结果。
+  WorkflowTransitionView transition = 1;
 }
