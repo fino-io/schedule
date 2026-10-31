@@ -1,70 +1,93 @@
-# Schedule Package
+# Schedule
 
-## 运行默认服务
+基于 Fino proto 契约的 Go 任务编排基础库，由 `chaos-io/schedule` 重构而来。业务结构直接使用生成类型，不额外维护另一套任务、配置和状态 DTO。
 
-需要 Go 1.25.13 或更新版本，以及 PATH 中的 `protoc-gen-go`、`protoc-gen-go-grpc`。在项目根目录执行：
+## 目录
+
+| 目录 | 内容 |
+| --- | --- |
+| `proto/schedule/` | 任务定义、状态流、运行快照和事件的契约源 |
+| `go/schedule/` | Fino 生成的 Go 类型，属于独立的 API 模块，不手工修改 |
+| `core/` | 项目维护的任务构建、校验、任务展开、路径查找、状态机和回调接口 |
+| `docs/`、`openapi/` | Fino 生成的契约文档及 JSON Schema |
+
+根 Go 模块通过 `replace github.com/fino-io/schedule/go => ./go` 使用同仓库生成类型。本地修改契约后不必先发布 API 模块；其他仓库使用时须先发布对应版本的 API 模块，或在自己的工作区关联本地模块。
+
+## 使用
+
+```go
+import (
+    schedule "github.com/fino-io/schedule/core"
+    pb "github.com/fino-io/schedule/go/schedule"
+)
+
+definition := &pb.WorkflowDefinition{
+    Root: schedule.NewSequence("root",
+        schedule.NewParallel("prepare",
+            schedule.NewTask("download"),
+            schedule.NewTask("compile"),
+        ),
+        schedule.NewTask("publish"),
+    ),
+}
+
+initial, err := schedule.Start(definition)
+if err != nil {
+    return err
+}
+// initial.ReadyTasks 包含 download、compile；publish 尚未激活。
+// initial.Instance 与定义分离，节点初始状态为 created，不会自动转为 running。
+```
+
+`NewTask`、`NewSequence`、`NewParallel` 返回生成的 `WorkItemDefinition`，可直接填写 `Name/Type/EntityId/OperationName` 等元数据。`AppendItems` 统一接受三类子任务，失败不会修改父节点。构建过程中可暂时保留空组合，但执行校验或展开时会拒绝空组合、空节点、缺失/重复 ID、共享节点和循环引用。树深度上限为 256，节点数上限为 10,000。
+
+`GetTasks` 保持原库的初始展开逻辑：串行只展开第一个子项，并行展开所有分支，结果顺序与定义一致，不根据运行状态筛选。`FindPath` 返回根至目标节点的路径；找不到时返回可用 `errors.Is(err, schedule.ErrTaskNotFound)` 判断的错误。两者返回定义树中的节点指针，按只读方式使用。
+
+`Start` 仅初始化运行快照及首批任务，两个实例互不共享状态，激活不会产生隐式状态转换。`Stateflow` 未提供时使用原示例的默认状态流。
+
+## 状态流
+
+```go
+flow, err := schedule.NewStateflow(&pb.StateflowDefinition{
+    Init: "queued",
+    Steps: []*pb.StateflowStep{
+        {From: "queued", To: "executing", Event: "started"},
+        {From: "executing", To: "done", Event: "completed"},
+    },
+})
+if err != nil {
+    return err
+}
+if err := flow.Goto("executing"); err != nil {
+    return err
+}
+saved := flow.Snapshot()
+restored, err := schedule.RestoreStateflow(saved)
+```
+
+状态机继续复用原依赖 `github.com/chaos-io/fsm`；适配层为状态名称分配内部编号，避免底层使用下划线拼接名称造成的冲突。状态名称、自环及循环均可自定义，不强制存在 `running/finished/failed`。定义与快照在进入状态机时复制，`Snapshot` 也返回副本，外部修改不会影响运行中的状态机。
+
+`NewStateflow(nil)` 使用默认状态流：`created → running → failed/stopped/finished/paused`。`GetStart` 返回初始状态；`Goto` 只接受配置中存在的转换，失败时保持原状态；`HasNext/IsDone` 只判断是否有出边，因此默认配置中的 `paused` 为终态。`Orchestrate` 从初始状态重新构建，不累积转换。`Debug` 启用时通过 `log/slog` 输出转换及事件名称，日志级别由调用方控制。
+
+`Stateflow` 是普通的有状态对象，同一实例的并发访问由调用方同步；不同实例没有全局配置或运行状态共享。
+
+## 与原库的边界
+
+原 `Scheduler` 的 `OnTask/OnState/OnEnd` 仍是 Go 接口，保留 `context.Context` 和 `error` 返回。回调参数改用生成的任务定义和运行快照：元数据从任务定义读取，节点状态从快照读取；实现方持有对应的工作流定义。节点的 `error_message` 只保存文本及存在性，不能恢复 Go 错误类型或错误链，实际 `error` 仍由调用方持有和处理。
+
+原库没有实现调度循环、串行完成后的自动推进、并行结果汇总或回调驱动。本次迁移其已有能力，未自行加入这些算法。`WorkflowTransition`、`WorkItemEvent`、`StateChange` 等类型为后续实现准备；`Start` 的输出也不会自动调用回调。串行失败后的策略、业务成功/失败与自定义状态的映射、回调失败的处理仍由实际执行系统明确。
+
+原 `SkipBranchError`、`Master` 只声明了字段，没有执行行为；当前保留其数据，不推测它们的作用。并行任一成功的规则来自原 README；“提前成功后其他已启动分支继续执行”属于契约中标明的后续补充约定，尚无执行器实现。未迁移原库中未使用的 tracing 函数及 Redis 读取示例测试。
+
+## 生成与验证
 
 ```bash
-fino doctor --targets=api,service
-fino build --targets=api,service
-cd backend
-cp .env.example .env
-go run ./cmd/schedule-server
+fino doctor --output=. --targets=api
+fino build --output=. --targets=api
+go test ./...
+go test -race ./...
+go vet ./...
+cd go && go test ./...
 ```
 
-默认 `fino.yaml` 不启用数据库，示例资源保存在内存中，重启服务后消失。HTTP、gRPC 和调试端口见 `backend/.env`；用 Ctrl-C 停止服务。再次启动无需重新复制 `.env`，已有配置和分页密钥应保留。
-
-## 调用接口
-
-HTTP 路径、方法和请求字段由 `proto/` 中的 RPC、HTTP 绑定与消息定义决定。生成后查看 [API 文档](docs/) 和 [OpenAPI](openapi/)，按对应接口的定义发送请求；HTTP 地址与端口以 `backend/.env` 为准。
-
-README 在创建项目时生成，后续由项目维护，`fino build` 不会覆盖。若在 README 或其他文件中添加调用示例，需随契约变更同步检查。
-
-## 修改与生成
-
-先改 `proto/` 契约，再从项目根目录重新运行 `fino build --targets=api,service`，更新 API 文档、OpenAPI 和生成代码。需要 Go 客户端时，在 targets 中加入 `client`。
-
-`fino create` 生成由项目维护的 [ER 配置](.fino/er.yaml)，已有文件保留，四项默认值为 `fields: keys`、`direction: TB`、`exclude_fields: []`、`relations: {}`。`fino build` 只读取配置并更新 [模型 ER 图](docs/er.md)，不补建或回写配置文件；缺失项使用默认值。
-
-需要 Web 前端时将 `frontend` 加入 `--targets`。目标和配置以本项目的 `fino.yaml` 为准。
-
-Go 依赖版本由各模块的 `go.mod`/`go.sum` 管理。默认不在 `package.yaml` 中固定 `core/go`、`finokit` 和 `gokit` 的版本；首次生成时由 `go mod tidy` 根据代码导入解析依赖，后续生成沿用已有版本。升级时在使用这些依赖的模块中执行 `go get <module>@latest` 和 `go mod tidy`，再测试和编译。需要显式约束版本时，可在 `package.dependencies` 中声明 `module@version`；生成器会先应用这些声明，再执行 `go mod tidy`，并保留已有 replacement。
-
-## Nacos 配置中心
-
-生成的服务默认包含 `backend/infra/nacos/`，Server 和 sidecar 统一调用 `nacos.LoadServiceConfig`，不需要在 `fino.yaml` 中选择配置中心。通过 `backend/.env` 或进程环境提供连接参数：
-
-```dotenv
-NACOS_SERVER_ADDR=<HTTP API 主机:端口>
-NACOS_NAMESPACE_ID=
-NACOS_GROUP=DEFAULT_GROUP
-NACOS_DATA_ID=
-NACOS_USERNAME=
-NACOS_PASSWORD=
-```
-
-配置了 `NACOS_SERVER_ADDR` 时优先读取 Nacos；连接、鉴权、读取、解析或初始化失败时，记录告警并读取本地 `configs/<service>/`。地址留空时直接使用本地配置，不尝试连接。如果远端和本地都不可用，启动失败并返回两侧错误。没有额外的启用开关。
-
-API 地址为 `host:port`，不带协议、路径，不能填写控制台地址；SDK gRPC 端口按 API 端口加 1000 计算，部署映射需满足此关系。public 命名空间 ID 留空，其余填写实际 ID。默认 Data ID 是 `<service>.yaml`，Group 为 `DEFAULT_GROUP`；多个服务共享环境文件时保持 `NACOS_DATA_ID` 为空。
-
-将对应服务目录中的 YAML 顶层配置合并后发布到 Nacos。保留 `${SERVER_*}`、`${PAGINATION_ENCODED_KEY}` 等占位符，由部署环境注入值；不上传本地 `.env` 或凭据。远端成功时使用完整远端配置，不叠加本地文件；本地文件仅用于兜底。启动时拉取一次、校验 YAML 并关闭 SDK，以禁用 watcher 的内存快照加载；发布后重启生效。禁用 SDK 自身的磁盘快照，避免它掩盖本地 configs 兜底策略。
-
-已有项目的 `bootstrap.go` 和 `.env.example` 会保留，升级时将启动加载改为 `nacos.LoadServiceConfig("<service>")` 并补齐环境变量；不要覆盖已有业务装配。自有 Worker 或其他入口可调用同一函数。SDK 首次依赖固定到已验证的 Fino module 路径版本，后续生成保留已有要求，`package.dependencies` 中的显式版本优先；不会向 finokit 根模块增加依赖。
-
-## 代码位置
-
-| 位置 | 用途 |
-| --- | --- |
-| `proto/` | 契约源，先在这里修改 RPC 与消息 |
-| `go/` | 生成的 API 与 client，不手工修改 |
-| `.fino/er.yaml` | ER 展示与特殊关系映射配置，手工维护 |
-| `backend/modules/<service>-server/app/` | RPC 入口、请求映射与业务响应 |
-| `backend/modules/<service>-server/domain/` | 用例、领域模型和仓储接口 |
-| `backend/modules/<service>-server/infra/` | 仓储与外部依赖实现 |
-| `backend/cmd/<service>-server/` | 启动配置与依赖装配 |
-
-生成的自定义 RPC 默认返回 `Unimplemented`。标准 CRUD 是骨架：发布前核对契约中的每个请求字段是否已贯穿 app、domain 和 repo，补全后验证对应请求路径。文件归属和具体约定见 `AGENTS.md` 与 `skills/fino/SKILL.md`。
-
-## 部署
-
-生成服务后，Docker Compose 配置见 [deploy/compose](deploy/compose/README.md)，Helm 业务与 infra 配置见 [deploy/helm](deploy/helm/README.md)。构建发布说明统一维护在 Helm README 中，环境覆盖在 `deploy/helm/environments/` 中维护。
+仅生成 `api` 目标，不生成 backend、frontend、服务启动程序或部署资产。项目契约与生成归属见 `AGENTS.md` 和 `skills/fino/SKILL.md`。

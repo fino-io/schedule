@@ -1,0 +1,17 @@
+{
+  "title": "schedule.ReadyTask",
+  "description": "对应 OnTask；通过 node_id 取得叶子定义和业务元数据。",
+  "type": "object",
+  "properties": {
+    "nodeId": {
+      "type": "string"
+    },
+    "path": {
+      "description": "对应 FindPath，依次包含根节点至当前叶子的 ID，含首尾。",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

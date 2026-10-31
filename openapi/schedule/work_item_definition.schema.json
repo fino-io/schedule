@@ -1,0 +1,56 @@
+{
+  "title": "schedule.WorkItemDefinition",
+  "description": "任务树的不可变定义；执行状态单独保存在运行快照中。\n 每个节点必须选择一种任务结构，节点 ID 在整棵树内唯一。\n ID 沿用调用方提供的业务标识，不要求 UUID；公共字段保留原任务元数据。",
+  "type": "object",
+  "properties": {
+    "entityId": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "operationName": {
+      "type": "string"
+    },
+    "parallelTask": {
+      "$ref": "#/components/schemas/schedule.ParallelTaskDefinition"
+    },
+    "sequenceTask": {
+      "$ref": "#/components/schemas/schedule.SequenceTaskDefinition"
+    },
+    "simpleTask": {
+      "$ref": "#/components/schemas/schedule.SimpleTaskDefinition"
+    },
+    "type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "not": {
+    "anyOf": [
+      {
+        "required": [
+          "simpleTask",
+          "sequenceTask"
+        ]
+      },
+      {
+        "required": [
+          "simpleTask",
+          "parallelTask"
+        ]
+      },
+      {
+        "required": [
+          "sequenceTask",
+          "parallelTask"
+        ]
+      }
+    ]
+  }
+}

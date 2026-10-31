@@ -1,0 +1,23 @@
+{
+  "title": "schedule.StateChange",
+  "description": "对应 OnState；每次合法转换产生一项，包括自动推进的组合节点。",
+  "type": "object",
+  "properties": {
+    "errorMessage": {
+      "description": "转换后状态的错误摘要，存在性与 WorkItemState.error_message 一致。",
+      "type": "string"
+    },
+    "event": {
+      "type": "string"
+    },
+    "from": {
+      "type": "string"
+    },
+    "nodeId": {
+      "type": "string"
+    },
+    "to": {
+      "type": "string"
+    }
+  }
+}

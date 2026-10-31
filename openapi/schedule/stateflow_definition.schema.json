@@ -1,0 +1,23 @@
+{
+  "title": "schedule.StateflowDefinition",
+  "description": "原 Flow/Step 配置的类型化表达，替代进程全局 YAML 单例。\n 状态保留字符串以支持自定义状态；原示例配置使用 paused，不自动转换状态名称。\n HasNext 取决于当前状态是否存在出边；无出边即 IsDone，包括原配置的 paused。",
+  "type": "object",
+  "properties": {
+    "debug": {
+      "description": "仅控制诊断输出，不影响转换结果；遍历时须处理环和重复状态。",
+      "type": "boolean"
+    },
+    "init": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/schedule.StateflowStep"
+      }
+    }
+  },
+  "required": [
+    "init"
+  ]
+}

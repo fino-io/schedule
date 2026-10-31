@@ -1,0 +1,86 @@
+## `schedule.WorkflowDefinition`
+
+编排库的数据契约，校验、启动和推进通过普通 Go 函数实现。
+ 定义与运行数据分离，同一定义可启动多个互不共享状态的实例。
+ 实例整个生命周期绑定同一份定义，由调用方负责保存、并发控制和实际任务执行。
+ 运行快照、事件和推进结果为后续实现准备，源库尚无对应编排实现。
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `root` | `schedule.WorkItemDefinition` |  | 是 |  |  |
+| `stateflow` | `schedule.StateflowDefinition` |  | 否 |  | 未提供时沿用原 flow.yaml：init=created；created -> running；<br> running -> failed/stopped/finished/paused，后四条转换的 event 与目标状态同名。<br> 提供配置时完全沿用其状态名称和转换，不要求存在 running/finished/failed，<br> 也不把特定名称强制视为终态；是否存在后续转换仅由 steps 决定。<br> 业务成功/失败与状态名称的映射、父节点汇总及目标状态由后续 Go 逻辑显式确定，<br> 不能仅凭无出边推断任务成功，也不能自动添加配置中不存在的转换。 |
+
+
+## `schedule.WorkflowInstance`
+
+新建时为全部节点记录 init 状态，激活本身不强制切换到某个命名状态。
+ 首批任务按原 GetTasks 展开：串行取首个子节点，并行取全部分支。
+ items 按定义树的前序顺序输出，每个定义节点恰好对应一项。
+ 接受快照前须校验节点集合、状态合法性及激活关系与定义一致。
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `items` | `Array<schedule.WorkItemState>` |  | 否 |  |  |
+
+
+## `schedule.WorkItemState`
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `nodeId` | `string` |  | 否 |  |  |
+| `state` | `string` |  | 否 |  |  |
+| `errorMessage` | `string` |  | 否 |  | 仅保存 Go error 的文本摘要；未设置表示无错误，显式空串表示错误文本为空。<br> 错误类型、错误链及 errors.Is/As 语义须由 Go 运行时保留，不能从摘要恢复。 |
+| `activated` | `boolean` |  | 否 |  | 进入过执行范围后保持 true，避免状态流回到 init 时重复分派任务。 |
+
+
+## `schedule.WorkItemEvent`
+
+任务状态报告或显式控制转换，沿用 Stateflow.Goto 的目标状态语义。
+ 只接受已激活节点的报告，不能以状态报告绕过串行顺序启动后续节点。
+ 自定义、暂停及停止转换只更新指定节点，不隐式取消外部任务或推断恢复规则。
+ 转换必须存在于状态流中，包括同名状态的自环；事件去重由调用方负责。
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `nodeId` | `string` |  | 是 |  |  |
+| `state` | `string` |  | 是 |  |  |
+| `errorMessage` | `string` |  | 否 |  | 目标状态的错误摘要；未设置表示无错误，与显式空文本区分。 |
+
+
+## `schedule.WorkflowTransition`
+
+启动/推进的显式结果，可为原 OnTask、OnState、OnEnd 回调提供数据。
+ 相同定义、快照和事件得到相同结果；失败不修改输入，也不返回部分推进结果。
+ 这些是后续推进实现的补充约定，不代表源库已有确定的调用顺序或错误处理规则。
+ 本消息不替代 Scheduler：Go 层仍须保留带 context.Context 和 error 返回的回调接口，
+ 明确回调失败如何反馈；普通函数返回的 error 也不由节点错误摘要替代。
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `instance` | `schedule.WorkflowInstance` |  | 否 |  |  |
+| `readyTasks` | `Array<schedule.ReadyTask>` |  | 否 |  | 仅包含本次新激活的叶子任务，按任务树声明顺序输出。 |
+| `stateChanges` | `Array<schedule.StateChange>` |  | 否 |  | 仅包含实际发生的合法状态转换；激活不自动产生状态转换。<br> 数组顺序及与任务通知的调用关系须由后续 Go 实现明确并保持确定。 |
+| `ended` | `boolean` |  | 否 |  | 仅在本次根节点首次进入无出边状态时为 true，对应 OnEnd。<br> 不表示所有分支均已结束；并行提前成功后，已启动分支内的串行后续任务<br> 仍可进入 ready_tasks。完成节点保持不变，迟到结果不得重复启动其上层后继，<br> 也不得重复产生结束通知；这些是后续编排的补充约定。 |
+
+
+## `schedule.ReadyTask`
+
+对应 OnTask；通过 node_id 取得叶子定义和业务元数据。
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `nodeId` | `string` |  | 否 |  |  |
+| `path` | `Array<string>` |  | 否 |  | 对应 FindPath，依次包含根节点至当前叶子的 ID，含首尾。 |
+
+
+## `schedule.StateChange`
+
+对应 OnState；每次合法转换产生一项，包括自动推进的组合节点。
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `nodeId` | `string` |  | 否 |  |  |
+| `from` | `string` |  | 否 |  |  |
+| `to` | `string` |  | 否 |  |  |
+| `event` | `string` |  | 否 |  |  |
+| `errorMessage` | `string` |  | 否 |  | 转换后状态的错误摘要，存在性与 WorkItemState.error_message 一致。 |

@@ -1,0 +1,13 @@
+{
+  "title": "schedule.WorkflowInstance",
+  "description": "新建时为全部节点记录 init 状态，激活本身不强制切换到某个命名状态。\n 首批任务按原 GetTasks 展开：串行取首个子节点，并行取全部分支。\n items 按定义树的前序顺序输出，每个定义节点恰好对应一项。\n 接受快照前须校验节点集合、状态合法性及激活关系与定义一致。",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/schedule.WorkItemState"
+      }
+    }
+  }
+}

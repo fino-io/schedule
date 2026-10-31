@@ -1,0 +1,20 @@
+{
+  "title": "schedule.StateflowStep",
+  "description": "转换由目标状态触发，event 是转换成功后的回调名称，不是输入触发器。\n 同一 from/to 只能声明一次；循环转换合法，不能将状态流当作无环图校验。",
+  "type": "object",
+  "properties": {
+    "event": {
+      "type": "string"
+    },
+    "from": {
+      "type": "string"
+    },
+    "to": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "from",
+    "to"
+  ]
+}

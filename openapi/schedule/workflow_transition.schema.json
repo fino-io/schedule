@@ -1,0 +1,28 @@
+{
+  "title": "schedule.WorkflowTransition",
+  "description": "启动/推进的显式结果，可为原 OnTask、OnState、OnEnd 回调提供数据。\n 相同定义、快照和事件得到相同结果；失败不修改输入，也不返回部分推进结果。\n 这些是后续推进实现的补充约定，不代表源库已有确定的调用顺序或错误处理规则。\n 本消息不替代 Scheduler：Go 层仍须保留带 context.Context 和 error 返回的回调接口，\n 明确回调失败如何反馈；普通函数返回的 error 也不由节点错误摘要替代。",
+  "type": "object",
+  "properties": {
+    "ended": {
+      "description": "仅在本次根节点首次进入无出边状态时为 true，对应 OnEnd。\n 不表示所有分支均已结束；并行提前成功后，已启动分支内的串行后续任务\n 仍可进入 ready_tasks。完成节点保持不变，迟到结果不得重复启动其上层后继，\n 也不得重复产生结束通知；这些是后续编排的补充约定。",
+      "type": "boolean"
+    },
+    "instance": {
+      "$ref": "#/components/schemas/schedule.WorkflowInstance"
+    },
+    "readyTasks": {
+      "description": "仅包含本次新激活的叶子任务，按任务树声明顺序输出。",
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/schedule.ReadyTask"
+      }
+    },
+    "stateChanges": {
+      "description": "仅包含实际发生的合法状态转换；激活不自动产生状态转换。\n 数组顺序及与任务通知的调用关系须由后续 Go 实现明确并保持确定。",
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/schedule.StateChange"
+      }
+    }
+  }
+}

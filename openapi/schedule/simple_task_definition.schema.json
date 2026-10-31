@@ -1,0 +1,5 @@
+{
+  "title": "schedule.SimpleTaskDefinition",
+  "description": "叶子任务；具体执行由调用方根据 type、entity_id、operation_name 分派。",
+  "type": "object"
+}
