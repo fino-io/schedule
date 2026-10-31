@@ -1,0 +1,32 @@
+{
+  "title": "schedule.Node",
+  "description": "静态组合树。每个节点代表一次执行位置，ID 在定义内唯一。\n Task 没有子项；Seq/All/Any 的子项非空，只有 Task 产生执行命令。",
+  "type": "object",
+  "properties": {
+    "children": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/schedule.Node"
+      }
+    },
+    "entityId": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/components/schemas/schedule.NodeKind"
+    },
+    "name": {
+      "type": "string"
+    },
+    "operationName": {
+      "type": "string"
+    },
+    "type": {
+      "description": "业务元数据由执行器解释，编排器不执行处理器或隐式传递输出。",
+      "type": "string"
+    }
+  }
+}

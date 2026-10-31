@@ -1,0 +1,24 @@
+{
+  "title": "schedule.Transition",
+  "type": "object",
+  "properties": {
+    "commands": {
+      "description": "固定按状态通知、任务分派、结束通知排列；同类按定义顺序输出。",
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/schedule.Command"
+      }
+    },
+    "instance": {
+      "$ref": "#/components/schemas/schedule.Instance"
+    },
+    "resultReady": {
+      "description": "派生视图：根结果已确定，不表示其他分支已经收尾。",
+      "type": "boolean"
+    },
+    "settled": {
+      "description": "派生视图：全部节点已终结，没有剩余执行或待激活后继。",
+      "type": "boolean"
+    }
+  }
+}

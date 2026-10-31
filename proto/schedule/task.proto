@@ -2,47 +2,26 @@ syntax = "proto3";
 
 package schedule;
 
-import "fino/options.proto";
-
 option go_package = "github.com/fino-io/schedule/go/schedule;schedule";
 
-// 任务树的不可变定义；执行状态单独保存在运行快照中。
-// 每个节点必须选择一种任务结构，节点 ID 在整棵树内唯一。
-// ID 沿用调用方提供的业务标识，不要求 UUID；公共字段保留原任务元数据。
-message WorkItemDefinition {
-  string id = 1 [(fino.validate) = {required: true}];
+enum NodeKind {
+  NODE_KIND_UNSPECIFIED = 0;
+  NODE_KIND_TASK = 1;
+  NODE_KIND_SEQ = 2;
+  NODE_KIND_ALL = 3;
+  NODE_KIND_ANY = 4;
+}
+
+// 静态组合树。每个节点代表一次执行位置，ID 在定义内唯一。
+// Task 没有子项；Seq/All/Any 的子项非空，只有 Task 产生执行命令。
+message Node {
+  string id = 1;
   string name = 2;
-  string type = 3;
-  string entity_id = 4;
-  string operation_name = 5;
+  NodeKind kind = 3;
+  repeated Node children = 4;
 
-  // oneof 本身不保证必填，校验任务树时还需检查结构非空、深度和节点数量。
-  oneof task {
-    SimpleTaskDefinition simple_task = 10;
-    SequenceTaskDefinition sequence_task = 11;
-    ParallelTaskDefinition parallel_task = 12;
-  }
-}
-
-// 叶子任务；具体执行由调用方根据 type、entity_id、operation_name 分派。
-message SimpleTaskDefinition {}
-
-// 子节点可以继续嵌套串行或并行任务；items 必须非空且不包含空节点。
-// 沿用原 README 的顺序执行语义；首批任务只从第一个子节点递归取得。
-// 源库没有实现完成后的推进与失败处理，不在这里预设失败立即终止或继续执行。
-message SequenceTaskDefinition {
-  repeated WorkItemDefinition items = 1 [(fino.validate) = {required: true min: 1}];
-}
-
-// 首批任务从全部分支递归取得；沿用原 README 的任一分支成功即整体成功规则。
-// 成功状态的识别、全部失败或混合终态的汇总规则，须在 Go 实现阶段明确。
-// 后续编排采用以下补充约定（源库尚无执行实现）：提前成功不取消已启动分支，
-// 这些分支内的串行后续节点仍可执行，但结果不再改写已完成的并行节点。
-message ParallelTaskDefinition {
-  repeated WorkItemDefinition items = 1 [(fino.validate) = {required: true min: 1}];
-
-  // 保留原 SkipBranchError 数据；源实现没有消费此字段，暂不改变汇总规则。
-  bool skip_branch_error = 2;
-  // 保留原 Master 数据；源实现未定义其语义，暂不用于选择分支或决定成功。
-  string master = 3;
+  // 业务元数据由执行器解释，编排器不执行处理器或隐式传递输出。
+  string type = 5;
+  string entity_id = 6;
+  string operation_name = 7;
 }

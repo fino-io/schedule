@@ -1,0 +1,28 @@
+{
+  "title": "schedule.Event",
+  "description": "STARTED/SUCCEEDED/FAILED/STOPPED 是叶子报告，绑定实例、节点和逻辑执行。\n PAUSE/RESUME/STOP 是实例控制，node_id/execution_id 及结果载荷必须为空。\n 事件 ID 的持久化去重由接入方负责；核心另外保证重复报告的语义幂等。",
+  "type": "object",
+  "properties": {
+    "errorMessage": {
+      "type": "string"
+    },
+    "executionId": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "instanceId": {
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/components/schemas/schedule.EventKind"
+    },
+    "nodeId": {
+      "type": "string"
+    },
+    "resultRef": {
+      "type": "string"
+    }
+  }
+}

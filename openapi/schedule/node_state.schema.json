@@ -1,0 +1,32 @@
+{
+  "title": "schedule.NodeState",
+  "type": "object",
+  "properties": {
+    "causeId": {
+      "description": "Seq/All 失败的直接子项，或跳过/停止的控制来源。",
+      "type": "string"
+    },
+    "errorMessage": {
+      "description": "未设置与显式空字符串不同；不能由文本恢复 Go 错误链。",
+      "type": "string"
+    },
+    "executionId": {
+      "description": "只供已产生分派意图的 Task 使用，重试不改变逻辑执行标识。",
+      "type": "string"
+    },
+    "nodeId": {
+      "type": "string"
+    },
+    "phase": {
+      "$ref": "#/components/schemas/schedule.Phase"
+    },
+    "resultRef": {
+      "description": "由执行器管理的结果引用，不在快照内存放业务输出。",
+      "type": "string"
+    },
+    "winnerId": {
+      "description": "Any 首次成功的直接子项，锁定后不再修改。",
+      "type": "string"
+    }
+  }
+}

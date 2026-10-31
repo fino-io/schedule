@@ -1,86 +1,135 @@
-## `schedule.WorkflowDefinition`
-
-编排库的数据契约，校验、启动和推进通过普通 Go 函数实现。
- 定义与运行数据分离，同一定义可启动多个互不共享状态的实例。
- 实例整个生命周期绑定同一份定义，由调用方负责保存、并发控制和实际任务执行。
- 运行快照、事件和推进结果为后续实现准备，源库尚无对应编排实现。
+## `schedule.Definition`
 
 | 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|---|
-| `root` | `schedule.WorkItemDefinition` |  | 是 |  |  |
-| `stateflow` | `schedule.StateflowDefinition` |  | 否 |  | 未提供时沿用原 flow.yaml：init=created；created -> running；<br> running -> failed/stopped/finished/paused，后四条转换的 event 与目标状态同名。<br> 提供配置时完全沿用其状态名称和转换，不要求存在 running/finished/failed，<br> 也不把特定名称强制视为终态；是否存在后续转换仅由 steps 决定。<br> 业务成功/失败与状态名称的映射、父节点汇总及目标状态由后续 Go 逻辑显式确定，<br> 不能仅凭无出边推断任务成功，也不能自动添加配置中不存在的转换。 |
+| `root` | `schedule.Node` |  | 否 |  |  |
 
 
-## `schedule.WorkflowInstance`
+## `schedule.Instance`
 
-新建时为全部节点记录 init 状态，激活本身不强制切换到某个命名状态。
- 首批任务按原 GetTasks 展开：串行取首个子节点，并行取全部分支。
- items 按定义树的前序顺序输出，每个定义节点恰好对应一项。
- 接受快照前须校验节点集合、状态合法性及激活关系与定义一致。
+调用方按 ID 原子创建实例，并用 revision 控制并发更新。
+ 快照与命令、已接受事件 ID 必须在同一事务中保存。
 
 | 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|---|
-| `items` | `Array<schedule.WorkItemState>` |  | 否 |  |  |
+| `id` | `string` |  | 否 |  |  |
+| `definitionHash` | `string` |  | 否 |  |  |
+| `revision` | `integer` | `Uint64` | 否 |  |  |
+| `mode` | [`schedule.Mode`](workflow.md#schedule-mode) |  | 否 |  |  |
+| `nodes` | `Array<schedule.NodeState>` |  | 否 |  | 严格按定义树前序排列，每个节点恰好一项。 |
 
 
-## `schedule.WorkItemState`
+## `schedule.NodeState`
 
 | 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|---|
 | `nodeId` | `string` |  | 否 |  |  |
-| `state` | `string` |  | 否 |  |  |
-| `errorMessage` | `string` |  | 否 |  | 仅保存 Go error 的文本摘要；未设置表示无错误，显式空串表示错误文本为空。<br> 错误类型、错误链及 errors.Is/As 语义须由 Go 运行时保留，不能从摘要恢复。 |
-| `activated` | `boolean` |  | 否 |  | 进入过执行范围后保持 true，避免状态流回到 init 时重复分派任务。 |
+| `phase` | [`schedule.Phase`](workflow.md#schedule-phase) |  | 否 |  |  |
+| `executionId` | `string` |  | 否 |  | 只供已产生分派意图的 Task 使用，重试不改变逻辑执行标识。 |
+| `errorMessage` | `string` |  | 否 |  | 未设置与显式空字符串不同；不能由文本恢复 Go 错误链。 |
+| `resultRef` | `string` |  | 否 |  | 由执行器管理的结果引用，不在快照内存放业务输出。 |
+| `winnerId` | `string` |  | 否 |  | Any 首次成功的直接子项，锁定后不再修改。 |
+| `causeId` | `string` |  | 否 |  | Seq/All 失败的直接子项，或跳过/停止的控制来源。 |
 
 
-## `schedule.WorkItemEvent`
+## `schedule.Event`
 
-任务状态报告或显式控制转换，沿用 Stateflow.Goto 的目标状态语义。
- 只接受已激活节点的报告，不能以状态报告绕过串行顺序启动后续节点。
- 自定义、暂停及停止转换只更新指定节点，不隐式取消外部任务或推断恢复规则。
- 转换必须存在于状态流中，包括同名状态的自环；事件去重由调用方负责。
-
-| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|---|
-| `nodeId` | `string` |  | 是 |  |  |
-| `state` | `string` |  | 是 |  |  |
-| `errorMessage` | `string` |  | 否 |  | 目标状态的错误摘要；未设置表示无错误，与显式空文本区分。 |
-
-
-## `schedule.WorkflowTransition`
-
-启动/推进的显式结果，可为原 OnTask、OnState、OnEnd 回调提供数据。
- 相同定义、快照和事件得到相同结果；失败不修改输入，也不返回部分推进结果。
- 这些是后续推进实现的补充约定，不代表源库已有确定的调用顺序或错误处理规则。
- 本消息不替代 Scheduler：Go 层仍须保留带 context.Context 和 error 返回的回调接口，
- 明确回调失败如何反馈；普通函数返回的 error 也不由节点错误摘要替代。
+STARTED/SUCCEEDED/FAILED/STOPPED 是叶子报告，绑定实例、节点和逻辑执行。
+ PAUSE/RESUME/STOP 是实例控制，node_id/execution_id 及结果载荷必须为空。
+ 事件 ID 的持久化去重由接入方负责；核心另外保证重复报告的语义幂等。
 
 | 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|---|
-| `instance` | `schedule.WorkflowInstance` |  | 否 |  |  |
-| `readyTasks` | `Array<schedule.ReadyTask>` |  | 否 |  | 仅包含本次新激活的叶子任务，按任务树声明顺序输出。 |
-| `stateChanges` | `Array<schedule.StateChange>` |  | 否 |  | 仅包含实际发生的合法状态转换；激活不自动产生状态转换。<br> 数组顺序及与任务通知的调用关系须由后续 Go 实现明确并保持确定。 |
-| `ended` | `boolean` |  | 否 |  | 仅在本次根节点首次进入无出边状态时为 true，对应 OnEnd。<br> 不表示所有分支均已结束；并行提前成功后，已启动分支内的串行后续任务<br> 仍可进入 ready_tasks。完成节点保持不变，迟到结果不得重复启动其上层后继，<br> 也不得重复产生结束通知；这些是后续编排的补充约定。 |
-
-
-## `schedule.ReadyTask`
-
-对应 OnTask；通过 node_id 取得叶子定义和业务元数据。
-
-| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|---|
+| `id` | `string` |  | 否 |  |  |
+| `instanceId` | `string` |  | 否 |  |  |
+| `kind` | [`schedule.EventKind`](workflow.md#schedule-eventkind) |  | 否 |  |  |
 | `nodeId` | `string` |  | 否 |  |  |
-| `path` | `Array<string>` |  | 否 |  | 对应 FindPath，依次包含根节点至当前叶子的 ID，含首尾。 |
+| `executionId` | `string` |  | 否 |  |  |
+| `errorMessage` | `string` |  | 否 |  |  |
+| `resultRef` | `string` |  | 否 |  |  |
 
 
-## `schedule.StateChange`
+## `schedule.Command`
 
-对应 OnState；每次合法转换产生一项，包括自动推进的组合节点。
+自包含、可持久化的执行或通知意图。接入方按 id 幂等投递。
+ STATE 包含节点状态变化或根的控制模式变化；END 只在首次全部收尾时产生。
 
 | 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|---|
-| `nodeId` | `string` |  | 否 |  |  |
-| `from` | `string` |  | 否 |  |  |
-| `to` | `string` |  | 否 |  |  |
-| `event` | `string` |  | 否 |  |  |
-| `errorMessage` | `string` |  | 否 |  | 转换后状态的错误摘要，存在性与 WorkItemState.error_message 一致。 |
+| `id` | `string` |  | 否 |  |  |
+| `instanceId` | `string` |  | 否 |  |  |
+| `definitionHash` | `string` |  | 否 |  |  |
+| `revision` | `integer` | `Uint64` | 否 |  |  |
+| `kind` | [`schedule.CommandKind`](workflow.md#schedule-commandkind) |  | 否 |  |  |
+| `state` | `schedule.NodeState` |  | 否 |  |  |
+| `previousPhase` | [`schedule.Phase`](workflow.md#schedule-phase) |  | 否 |  |  |
+| `mode` | [`schedule.Mode`](workflow.md#schedule-mode) |  | 否 |  |  |
+| `previousMode` | [`schedule.Mode`](workflow.md#schedule-mode) |  | 否 |  |  |
+| `path` | `Array<string>` |  | 否 |  |  |
+| `task` | `schedule.Node` |  | 否 |  | 只有 TASK 命令包含叶子定义，通知无需重新装载整棵树。 |
+
+
+## `schedule.Transition`
+
+| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|---|
+| `instance` | `schedule.Instance` |  | 否 |  |  |
+| `commands` | `Array<schedule.Command>` |  | 否 |  | 固定按状态通知、任务分派、结束通知排列；同类按定义顺序输出。 |
+| `resultReady` | `boolean` |  | 否 |  | 派生视图：根结果已确定，不表示其他分支已经收尾。 |
+| `settled` | `boolean` |  | 否 |  | 派生视图：全部节点已终结，没有剩余执行或待激活后继。 |
+
+
+<a id="schedule-phase"></a>
+
+## `schedule.Phase`
+
+| 枚举值 | 数值 | 说明 |
+|---|---:|---|
+| `PHASE_UNSPECIFIED` | 0 |  |
+| `PHASE_PENDING` | 1 |  |
+| `PHASE_READY` | 2 |  |
+| `PHASE_RUNNING` | 3 |  |
+| `PHASE_SUCCEEDED` | 4 |  |
+| `PHASE_FAILED` | 5 |  |
+| `PHASE_STOPPED` | 6 |  |
+| `PHASE_SKIPPED` | 7 |  |
+
+
+<a id="schedule-mode"></a>
+
+## `schedule.Mode`
+
+| 枚举值 | 数值 | 说明 |
+|---|---:|---|
+| `MODE_UNSPECIFIED` | 0 |  |
+| `MODE_RUNNING` | 1 |  |
+| `MODE_PAUSED` | 2 |  |
+| `MODE_STOPPED` | 3 |  |
+
+
+<a id="schedule-eventkind"></a>
+
+## `schedule.EventKind`
+
+| 枚举值 | 数值 | 说明 |
+|---|---:|---|
+| `EVENT_KIND_UNSPECIFIED` | 0 |  |
+| `EVENT_KIND_STARTED` | 1 |  |
+| `EVENT_KIND_SUCCEEDED` | 2 |  |
+| `EVENT_KIND_FAILED` | 3 |  |
+| `EVENT_KIND_STOPPED` | 4 |  |
+| `EVENT_KIND_PAUSE` | 5 |  |
+| `EVENT_KIND_RESUME` | 6 |  |
+| `EVENT_KIND_STOP` | 7 |  |
+
+
+<a id="schedule-commandkind"></a>
+
+## `schedule.CommandKind`
+
+| 枚举值 | 数值 | 说明 |
+|---|---:|---|
+| `COMMAND_KIND_UNSPECIFIED` | 0 |  |
+| `COMMAND_KIND_TASK` | 1 |  |
+| `COMMAND_KIND_STATE` | 2 |  |
+| `COMMAND_KIND_END` | 3 |  |

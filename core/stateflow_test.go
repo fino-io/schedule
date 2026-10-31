@@ -1,135 +1,89 @@
 package schedule
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 
 	pb "github.com/fino-io/schedule/go/schedule"
 	"google.golang.org/protobuf/proto"
 )
 
-func TestDefaultStateflow(t *testing.T) {
-	for _, terminal := range []string{"failed", "stopped", "finished", "paused"} {
-		t.Run(terminal, func(t *testing.T) {
-			flow, err := NewStateflow(nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if flow.GetStart() != "created" || flow.IsDone() {
-				t.Fatal("unexpected initial state")
-			}
-			if err := flow.Goto("running"); err != nil {
-				t.Fatal(err)
-			}
-			before := flow.Snapshot()
-			if err := flow.Goto("pause"); err == nil || !proto.Equal(before, flow.Snapshot()) {
-				t.Fatal("invalid transition changed the machine")
-			}
-			if err := flow.Goto(terminal); err != nil {
-				t.Fatal(err)
-			}
-			if flow.State() != terminal || !flow.IsDone() {
-				t.Fatal("terminal state not applied")
-			}
-			flow.Orchestrate()
-			flow.Orchestrate()
-			if flow.State() != "created" || len(flow.Snapshot().Definition.Steps) != 5 {
-				t.Fatal("reset accumulated transitions")
-			}
-		})
-	}
-}
-
-func TestCustomStatesCyclesAndRestore(t *testing.T) {
+func TestIndependentStateflow(t *testing.T) {
 	definition := &pb.StateflowDefinition{
 		Init: "a_b",
 		Steps: []*pb.StateflowStep{
 			{From: "a_b", To: "c", Event: "first"},
-			{From: "a", To: "b_c", Event: "collision"},
-			{From: "c", To: "a", Event: "continue"},
+			{From: "a", To: "b_c", Event: "other"},
+			{From: "c", To: "a"},
 			{From: "a", To: "a", Event: "self"},
 		},
 	}
-	flow, err := NewStateflow(definition)
+	flow, err := CompileStateflow(definition)
 	if err != nil {
 		t.Fatal(err)
 	}
 	definition.Init = "mutated"
-	if !flow.HasNext() {
-		t.Fatal("underscore state lost its outgoing transition")
+	instance := flow.Start()
+	if hasNext, err := flow.HasNext(instance.State); !hasNext || err != nil {
+		t.Fatal("underscore state incorrectly terminal")
 	}
-	if err := flow.Goto("b_c"); err == nil {
-		t.Fatal("colliding transition accepted")
+	before := proto.Clone(instance)
+	if _, _, err := flow.Advance(instance, "b_c"); !errors.Is(err, ErrInvalidEvent) || !proto.Equal(before, instance) {
+		t.Fatal("colliding edge accepted or input mutated")
 	}
-	for _, state := range []string{"c", "a", "a"} {
-		if err := flow.Goto(state); err != nil {
-			t.Fatal(err)
+	for _, target := range []string{"c", "a", "a", "b_c"} {
+		next, step, err := flow.Advance(instance, target)
+		if err != nil || step.From != instance.State || step.To != target {
+			t.Fatalf("transition=%v error=%v", step, err)
 		}
+		if target == "a" && step.From == "a" && step.Event != "self" {
+			t.Fatal("self-loop lost event label")
+		}
+		instance = next
 	}
-	data, err := proto.Marshal(flow.Snapshot())
+	if hasNext, err := flow.HasNext(instance.State); hasNext || err != nil {
+		t.Fatal("terminal state has outgoing edge")
+	}
+	data, err := proto.Marshal(instance)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := &pb.StateflowInstance{}
-	if err := proto.Unmarshal(data, snapshot); err != nil {
+	decoded := &pb.StateflowInstance{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := RestoreStateflow(snapshot)
-	if err != nil {
+	restored, err := flow.Restore(decoded)
+	if err != nil || !proto.Equal(restored, instance) {
+		t.Fatal("snapshot round-trip failed")
+	}
+	if _, err := flow.HasNext("missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
-	}
-	snapshot.Definition.Steps[1].To = "mutated"
-	if err := restored.Goto("b_c"); err != nil || !restored.IsDone() {
-		t.Fatalf("restored machine = %s, error = %v", restored.State(), err)
-	}
-	if flow.State() != "a" {
-		t.Fatal("restored machine shared state with the original")
 	}
 }
 
-func TestStateflowWithManyStates(t *testing.T) {
-	definition := &pb.StateflowDefinition{Init: "state_0"}
-	for i := range 32 {
-		definition.Steps = append(definition.Steps, &pb.StateflowStep{
-			From: fmt.Sprintf("state_%d", i),
-			To:   fmt.Sprintf("state_%d", i+1),
-		})
-	}
-	flow, err := NewStateflow(definition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 1; i <= 32; i++ {
-		if !flow.HasNext() {
-			t.Fatalf("state %s unexpectedly terminal", flow.State())
-		}
-		if err := flow.Goto(fmt.Sprintf("state_%d", i)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !flow.IsDone() {
-		t.Fatal("last state should be terminal")
-	}
-}
-
-func TestInvalidStateflow(t *testing.T) {
+func TestStateflowBoundaries(t *testing.T) {
 	for _, definition := range []*pb.StateflowDefinition{
-		{},
-		{Init: "start", Steps: []*pb.StateflowStep{nil}},
+		nil, {}, {Init: "start", Steps: []*pb.StateflowStep{nil}},
 		{Init: "start", Steps: []*pb.StateflowStep{{From: "start"}}},
 		{Init: "start", Steps: []*pb.StateflowStep{{From: "start", To: "end"}, {From: "start", To: "end"}}},
 	} {
-		if _, err := NewStateflow(definition); err == nil {
-			t.Fatal("invalid definition accepted")
+		if _, err := CompileStateflow(definition); !errors.Is(err, ErrInvalidDefinition) {
+			t.Fatal("invalid stateflow accepted")
 		}
 	}
-	for _, instance := range []*pb.StateflowInstance{nil, {Definition: DefaultStateflow(), State: "unknown"}} {
-		if _, err := RestoreStateflow(instance); err == nil {
+	flow, err := CompileStateflow(&pb.StateflowDefinition{Init: "only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasNext, err := flow.HasNext("only"); hasNext || err != nil {
+		t.Fatal("single-state flow should be terminal")
+	}
+	for _, snapshot := range []*pb.StateflowInstance{
+		nil, {Definition: &pb.StateflowDefinition{Init: "other"}, State: "other"},
+		{Definition: &pb.StateflowDefinition{Init: "only"}, State: "missing"},
+	} {
+		if _, err := flow.Restore(snapshot); !errors.Is(err, ErrInvalidSnapshot) {
 			t.Fatal("invalid snapshot accepted")
 		}
-	}
-	flow, err := NewStateflow(&pb.StateflowDefinition{Init: "only"})
-	if err != nil || !flow.IsDone() {
-		t.Fatal("single-state flow should be terminal")
 	}
 }

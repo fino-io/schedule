@@ -2,32 +2,22 @@ syntax = "proto3";
 
 package schedule;
 
-import "fino/options.proto";
-
 option go_package = "github.com/fino-io/schedule/go/schedule;schedule";
 
-// 原 Flow/Step 配置的类型化表达，替代进程全局 YAML 单例。
-// 状态保留字符串以支持自定义状态；原示例配置使用 paused，不自动转换状态名称。
-// HasNext 取决于当前状态是否存在出边；无出边即 IsDone，包括原配置的 paused。
+// 独立的业务状态流，不参与工作流执行生命周期。允许自环、循环和单态图。
 message StateflowDefinition {
-  string init = 1 [(fino.validate) = {required: true}];
+  string init = 1;
   repeated StateflowStep steps = 2;
-  // 仅控制诊断输出，不影响转换结果；遍历时须处理环和重复状态。
-  bool debug = 3;
 }
 
-// 转换由目标状态触发，event 是转换成功后的回调名称，不是输入触发器。
-// 同一 from/to 只能声明一次；循环转换合法，不能将状态流当作无环图校验。
+// 通过目标状态选择转换；event 是转换输出标签，不是输入触发器。
 message StateflowStep {
-  string from = 1 [(fino.validate) = {required: true}];
-  string to = 2 [(fino.validate) = {required: true}];
+  string from = 1;
+  string to = 2;
   string event = 3;
 }
 
-// 独立状态机的运行数据，对应原 Stateflow 的配置及当前 State。
-// 不依赖任务树；GetStart 由 definition.init 取得，Goto/HasNext/IsDone 由 Go 实现。
 message StateflowInstance {
-  StateflowDefinition definition = 1 [(fino.validate) = {required: true}];
-  // 必须属于 definition 的初始状态或转换端点；新建实例时使用 definition.init。
-  string state = 2 [(fino.validate) = {required: true}];
+  StateflowDefinition definition = 1;
+  string state = 2;
 }

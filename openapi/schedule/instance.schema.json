@@ -1,0 +1,27 @@
+{
+  "title": "schedule.Instance",
+  "description": "调用方按 ID 原子创建实例，并用 revision 控制并发更新。\n 快照与命令、已接受事件 ID 必须在同一事务中保存。",
+  "type": "object",
+  "properties": {
+    "definitionHash": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/components/schemas/schedule.Mode"
+    },
+    "nodes": {
+      "description": "严格按定义树前序排列，每个节点恰好一项。",
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/schedule.NodeState"
+      }
+    },
+    "revision": {
+      "type": "string",
+      "format": "uint64"
+    }
+  }
+}

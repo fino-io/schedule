@@ -1,0 +1,44 @@
+{
+  "title": "schedule.Command",
+  "description": "自包含、可持久化的执行或通知意图。接入方按 id 幂等投递。\n STATE 包含节点状态变化或根的控制模式变化；END 只在首次全部收尾时产生。",
+  "type": "object",
+  "properties": {
+    "definitionHash": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "instanceId": {
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/components/schemas/schedule.CommandKind"
+    },
+    "mode": {
+      "$ref": "#/components/schemas/schedule.Mode"
+    },
+    "path": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "previousMode": {
+      "$ref": "#/components/schemas/schedule.Mode"
+    },
+    "previousPhase": {
+      "$ref": "#/components/schemas/schedule.Phase"
+    },
+    "revision": {
+      "type": "string",
+      "format": "uint64"
+    },
+    "state": {
+      "$ref": "#/components/schemas/schedule.NodeState"
+    },
+    "task": {
+      "$ref": "#/components/schemas/schedule.Node"
+    }
+  }
+}
