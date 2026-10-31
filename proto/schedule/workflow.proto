@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package schedule;
+
+import "fino/options.proto";
+import "schedule/stateflow.proto";
+import "schedule/task.proto";
+
+option go_package = "github.com/fino-io/schedule/go/schedule;schedule";
+
+// 编排库的数据契约，校验、启动和推进通过普通 Go 函数实现。
+// 定义与运行数据分离，同一定义可启动多个互不共享状态的实例。
+// 实例整个生命周期绑定同一份定义，由调用方负责保存、并发控制和实际任务执行。
+message WorkflowDefinition {
+  WorkItemDefinition root = 1 [(fino.validate) = {required: true}];
+
+  // 未提供时沿用原 flow.yaml：init=created；created -> running；
+  // running -> failed/stopped/finished/paused，后四条转换的 event 与目标状态同名。
+  // 编排使用 running/finished/failed 表示执行中/成功/失败；自定义状态保留原名，
+  // 按 steps 校验，不自动推断为成功或失败。编排定义须允许 init -> running、
+  // running -> finished 和 running -> failed，且 finished/failed 不得有出边。
+  // 独立使用 StateflowDefinition 时不受这些编排状态名称和终态约束。
+  StateflowDefinition stateflow = 2;
+}
+
+// 启动时为全部节点创建 init 状态；进入执行范围的组合节点及叶子转为 running。
+// 串行只激活首个子节点，并行激活全部分支。
+// items 按定义树的前序顺序输出，每个定义节点恰好对应一项。
+// 接受快照前须校验节点集合、状态合法性及激活关系与定义一致。
+message WorkflowInstance {
+  repeated WorkItemState items = 1;
+}
+
+message WorkItemState {
+  string node_id = 1;
+  string state = 2;
+  // Go error 不进入线协议，只保留可传输的错误摘要。
+  string error_message = 3;
+  // 进入过执行范围后保持 true，避免状态流回到 init 时重复分派任务。
+  bool activated = 4;
+}
+
+// 任务状态报告或显式控制转换，沿用 Stateflow.Goto 的目标状态语义。
+// 只接受已激活节点的报告，不能以状态报告绕过串行顺序启动后续节点。
+// 自定义、暂停及停止转换只更新指定节点，不隐式取消外部任务或推断恢复规则。
+// 转换必须存在于状态流中，包括同名状态的自环；事件去重由调用方负责。
+message WorkItemEvent {
+  string node_id = 1 [(fino.validate) = {required: true}];
+  string state = 2 [(fino.validate) = {required: true}];
+  string error_message = 3;
+}
+
+// 启动/推进的显式结果，对应原 OnTask、OnState、OnEnd 回调。
+// 相同定义、快照和事件得到相同结果；失败不修改输入，也不返回部分推进结果。
+// 调用方接受新快照后处理任务和通知，库内不执行任务或投递回调。
+message WorkflowTransition {
+  WorkflowInstance instance = 1;
+  // 仅包含本次新激活的叶子任务，按任务树声明顺序输出。
+  repeated ReadyTask ready_tasks = 2;
+  // 启动时按父到子输出激活转换；推进时先输出报告节点，
+  // 再按子到父传播，最后输出新激活节点的转换，顺序保持确定。
+  repeated StateChange state_changes = 3;
+  // 仅在本次根节点首次进入无出边状态时为 true，对应 OnEnd。
+  // 不表示其他已启动分支已停止；已结束祖先保持不变，仍可记录在途分支结果，
+  // 但不再激活其后续任务，也不重复产生结束通知。
+  bool ended = 4;
+}
+
+// 对应 OnTask；通过 node_id 取得叶子定义和业务元数据。
+message ReadyTask {
+  string node_id = 1;
+  // 对应 FindPath，依次包含根节点至当前叶子的 ID，含首尾。
+  repeated string path = 2;
+}
+
+// 对应 OnState；每次合法转换产生一项，包括自动推进的组合节点。
+message StateChange {
+  string node_id = 1;
+  string from = 2;
+  string to = 3;
+  string event = 4;
+  string error_message = 5;
+}
