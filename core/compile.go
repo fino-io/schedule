@@ -112,10 +112,7 @@ func (w *Workflow) Path(id string) ([]string, error) {
 	if !exists {
 		return nil, fmt.Errorf("%w: %q", ErrNotFound, id)
 	}
-	return w.path(i), nil
-}
 
-func (w *Workflow) path(i int) []string {
 	var path []string
 	for i >= 0 {
 		path = append(path, w.nodes[i].Id)
@@ -124,7 +121,7 @@ func (w *Workflow) path(i int) []string {
 
 	slices.Reverse(path)
 
-	return path
+	return path, nil
 }
 
 func stableID(parts ...string) string {

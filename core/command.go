@@ -45,7 +45,7 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 		}
 	}
 
-	if result.Settled && previous != nil {
+	if result.Settled {
 		end := command(0, pb.CommandKind_COMMAND_KIND_END)
 		end.Id = stableID("end", instance.Id)
 		result.Commands = append(result.Commands, end)

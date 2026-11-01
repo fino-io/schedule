@@ -55,37 +55,15 @@ if err != nil {
 // initial 保持不变。整个流程的结果确定后，仍需等待 backup 收尾。
 ```
 
-`Task/Seq/All/Any` 直接返回生成的 `Node`。可填写 `Name/Type/EntityId/OperationName` 等元数据，由执行器解释。组合节点本身不向 Worker 分派。
+`Task/Seq/All/Any` 返回生成的 `Node`，业务元数据由执行器解释。定义编译和查询见[调用路径](docs/architecture.md#调用路径)。
 
-任务树本身就是定义，可直接追加 `node.Children` 后调用 `Compile(root)`。编译一次校验整树、复制定义并建立索引；拒绝空组合、重复 ID、共享节点和循环，深度上限 256、节点上限 10,000。编译后的 `Workflow` 不保存实例状态，可以并发复用。`Root/Node/Path` 提供定义副本和路径查询，外部修改不会影响内部索引。
+执行报告的 `Event.ExecutionId` 原样回传任务命令的 `Id`。接入方须原子保存事件去重记录、快照与 outbox，提交后可用 `Dispatch(ctx, handle, commands)` 幂等投递。完整约定见[接入方责任](docs/architecture.md#接入方责任)。
 
-## 推进与恢复
-
-- `workflow.Start(instanceID)` 初始化实例和首批命令。同 ID、同定义会计算出相同结果；是否已创建由接入方原子判断。
-- `workflow.Advance(instance, event)` 校验快照及事件，在副本上计算。非法事件不修改输入，重复开始或相同终态不产生新命令，冲突终态返回 `ErrConflict`。
-- `workflow.Restore(instance)` 验证定义绑定、节点状态和组合决策，返回独立快照与派生视图，不重新生成分派命令。
-
-用 `proto.Marshal/Unmarshal` 或 `protojson.Marshal/Unmarshal` 保存生成类型。快照中的节点按定义前序排列，不可重排。定义指纹不匹配、依赖被绕过或结果汇总缺失时，恢复会返回 `ErrInvalidSnapshot`。
-
-`Transition.ResultReady` 表示根结果已经确定；`Transition.Settled` 表示所有分支均已收尾。`Any` 可以提前发布成功结果，其余已激活分支及内部串行后继继续执行。祖先失败或实例停止会阻止相应范围内的新分派，暂停则暂缓后继，恢复后继续推进。
-
-控制通过 `Event` 的 `PAUSE/RESUME/STOP` 类型提交，实例 ID、事件 ID 必填，节点、执行标识和结果载荷留空。执行报告只接受已分派的 `Task` 节点，`Event.ExecutionId` 必须原样回传任务命令的 `Id`。该标识由实例 ID 与节点 ID 确定，节点快照不重复保存它。停止不等于物理取消；已分派任务等待执行方的实际终态报告。节点重试由执行器完成，核心只接受最终逻辑结果；重跑整个流程使用新实例 ID。
-
-## 命令与接入协议
-
-`Command` 包含稳定 ID、实例与定义绑定、修订号、当前节点状态和控制模式。任务命令还包含完整叶子定义，可以直接保存到 outbox；同一次计算按状态通知、任务分派、结束通知的顺序输出。每种命令内部按定义顺序排列。
-
-状态通知表达当前状态，消费方按命令 ID 去重，并用修订号防止旧通知覆盖新状态；需要比较前后状态时保存自己的投影视图。层级路径通过 `workflow.Path(nodeID)` 按需查询。
-
-接入方须原子保存事件去重记录、新快照与 outbox，串行更新同一实例，并按事件及命令 ID 幂等处理。保存后、分派前退出时补发已保存的命令。完整约定见[接入方责任](docs/architecture.md#接入方责任)。
-
-提交成功后可用 `Dispatch(ctx, handle, commands)` 按顺序分派。`handle` 是一个 `func(context.Context, *pb.Command) error`，按 `command.Kind` 处理任务或通知，接收的是命令副本。首个失败返回 `DispatchError`，包含索引、命令 ID 和原始错误，可用 `errors.Is/As` 判断；不自动回滚或重放整批命令。
-
-公开 API 接入测试覆盖快照与 outbox 分别序列化后的恢复、命令重投、控制通知和执行收尾。内存接入协议测试另行覆盖事件去重、旧控制事件和并发提交；库不提供生产存储、超时回收或恰好一次副作用保证。
+暂停、停止及 `ResultReady/Settled` 的含义见[固定执行规则](docs/architecture.md#固定执行规则)；持久化、恢复和命令处理见[快照与命令的一致性](docs/architecture.md#快照与命令的一致性)。
 
 ## 独立状态流
 
-业务状态流与编排生命周期分离，使用本地 `(from, to)` 转换表，不依赖通用 FSM 框架：
+业务状态流使用独立的 `(from, to)` 转换表，当前状态由业务保存：
 
 ```go
 flow, err := schedule.CompileStateflow(&pb.StateflowDefinition{
@@ -106,27 +84,17 @@ if err != nil {
 state = step.To
 ```
 
-支持任意状态名、自环、循环和单态图。`step.Event` 是转换输出标签；`HasNext(state)` 判断有无出边。编译后的表只验证并查询转换，当前状态由业务保存；合法自环仍返回转换信息，输入定义和返回的转换均不与表共享可变数据。
+`step.Event` 是转换输出标签；`HasNext(state)` 判断有无出边。支持任意状态名、自环、循环和单态图，输入定义及返回值均不与内部表共享可变数据。
 
-## 目录与验证
+## 开发与验证
 
-| 路径 | 归属 |
-| --- | --- |
-| `proto/schedule/` | 数据契约源，无 service、HTTP 或数据库模型 |
-| `go/schedule/` | Fino 生成类型，不手工修改 |
-| `core/` | 任务装配、编译、事件推进、归约、快照恢复、命令与回调分派；文件职责见架构说明 |
-| `docs/architecture.md` | 项目维护的架构与接入约定 |
-| `docs/schedule/`、`openapi/` | Fino 生成的契约文档和 JSON Schema |
+代码职责和生成归属见[代码结构](docs/architecture.md#代码结构)。本地消费方需同时关联根模块和 `go/` API 模块，具体方式见[消费方接入](docs/architecture.md#消费方接入)。
 
-根模块和 `go/` API 是两个独立 Go 模块。本地消费方需通过工作区关联两者，或同时配置两个本地 `replace`；正式接入使用已发布且匹配的模块版本。具体命令见[消费方接入](docs/architecture.md#消费方接入)。
+实现改动的基本检查：
 
 ```bash
-fino doctor --output=. --targets=api
-fino build --output=. --targets=api
 go test ./...
-go test -race ./...
 go vet ./...
-cd go && go test ./...
 ```
 
-本项目仅生成 `api`，没有 backend、frontend、部署或应用二进制发布配置。
+竞态、API 模块、fuzz、基准和契约生成的检查方式见[验证](docs/architecture.md#验证)。

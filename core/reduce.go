@@ -10,9 +10,6 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 	var visit func(int, bool, string)
 	visit = func(i int, allowed bool, blocker string) {
 		state, node := instance.Nodes[i], w.nodes[i]
-		if instance.Mode == modeStopped {
-			blocker = w.nodes[0].Id
-		}
 
 		if state.Phase == pending {
 			if blocker != "" {
@@ -49,7 +46,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		prefixSucceeded := true
 		for _, child := range node.children {
 			phase := instance.Nodes[child].Phase
-			canActivate := node.Kind != seq || prefixSucceeded || phase != pending
+			canActivate := node.Kind != seq || prefixSucceeded
 			prefixSucceeded = prefixSucceeded && phase == succeeded
 			visit(child, allowed && canActivate, blocker)
 		}
@@ -57,13 +54,18 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		w.resolve(instance, i, -1)
 	}
 
-	visit(0, instance.Mode == modeRunning, "")
+	blocker := ""
+	if instance.Mode == modeStopped {
+		blocker = w.nodes[0].Id
+	}
+
+	visit(0, instance.Mode == modeRunning, blocker)
 }
 
 // resolve 只锁定组合结果，不分派工作；preferred 是本次报告影响或恢复校验指定的直接子项。
 func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 	state, node := instance.Nodes[i], w.nodes[i]
-	if state.Phase != running || node.Kind == task {
+	if state.Phase != running {
 		return
 	}
 
