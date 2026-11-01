@@ -12,7 +12,7 @@ import (
 func mustCompile(t testing.TB, root *pb.Node) *Workflow {
 	t.Helper()
 
-	w, err := Compile(&pb.Definition{Root: root})
+	w, err := Compile(root)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,11 +17,3 @@
 | `from` | `string` |  | 否 |  |  |
 | `to` | `string` |  | 否 |  |  |
 | `event` | `string` |  | 否 |  |  |
-
-
-## `schedule.StateflowInstance`
-
-| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|---|
-| `definition` | `schedule.StateflowDefinition` |  | 否 |  |  |
-| `state` | `string` |  | 否 |  |  |

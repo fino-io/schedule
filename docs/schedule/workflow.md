@@ -1,10 +1,3 @@
-## `schedule.Definition`
-
-| 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|---|
-| `root` | `schedule.Node` |  | 否 |  |  |
-
-
 ## `schedule.Instance`
 
 调用方按 ID 原子创建实例，并用 revision 控制并发更新。

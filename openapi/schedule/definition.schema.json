@@ -1,9 +1,0 @@
-{
-  "title": "schedule.Definition",
-  "type": "object",
-  "properties": {
-    "root": {
-      "$ref": "#/components/schemas/schedule.Node"
-    }
-  }
-}

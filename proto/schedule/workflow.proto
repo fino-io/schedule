@@ -42,10 +42,6 @@ enum CommandKind {
   COMMAND_KIND_END = 3;
 }
 
-message Definition {
-  Node root = 1;
-}
-
 // 调用方按 ID 原子创建实例，并用 revision 控制并发更新。
 // 快照与命令、已接受事件 ID 必须在同一事务中保存。
 message Instance {

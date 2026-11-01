@@ -19,12 +19,10 @@ import (
     pb "github.com/fino-io/schedule/go/schedule"
 )
 
-workflow, err := schedule.Compile(&pb.Definition{
-    Root: schedule.Seq("root",
-        schedule.Any("source", schedule.Task("primary"), schedule.Task("backup")),
-        schedule.Task("publish"),
-    ),
-})
+workflow, err := schedule.Compile(schedule.Seq("root",
+    schedule.Any("source", schedule.Task("primary"), schedule.Task("backup")),
+    schedule.Task("publish"),
+))
 if err != nil {
     return err
 }
@@ -59,7 +57,7 @@ if err != nil {
 
 `Task/Seq/All/Any` 直接返回生成的 `Node`。可填写 `Name/Type/EntityId/OperationName` 等元数据，由执行器解释。组合节点本身不向 Worker 分派。
 
-`Append` 仅做局部检查，允许先挂空组合再补齐子项。`Compile` 一次校验整树、复制定义并建立索引；拒绝空组合、重复 ID、共享节点和循环，深度上限 256、节点上限 10,000。编译后的 `Workflow` 不保存实例状态，可以并发复用。`Definition/Node/Path` 提供定义副本和路径查询，外部修改不会影响内部索引。
+任务树本身就是定义，可直接追加 `node.Children` 后调用 `Compile(root)`。编译一次校验整树、复制定义并建立索引；拒绝空组合、重复 ID、共享节点和循环，深度上限 256、节点上限 10,000。编译后的 `Workflow` 不保存实例状态，可以并发复用。`Root/Node/Path` 提供定义副本和路径查询，外部修改不会影响内部索引。
 
 ## 推进与恢复
 
@@ -84,7 +82,7 @@ if err != nil {
 3. 以事件 ID 去重；同 ID 不同内容视为冲突。核心的状态幂等不能阻止旧暂停事件在恢复后被重新应用。
 4. 可靠通知同样入库，重试投递由接入方负责。`END` 仅在首次全部收尾时生成，`Settled` 不代表通知已送达。
 
-`Scheduler` 的 `OnTask/OnState/OnEnd` 接收命令，保留 `context.Context` 和 Go `error`。提交成功后可用 `Dispatch(ctx, scheduler, commands)` 按顺序分派。首个失败返回 `DispatchError`，包含索引、命令 ID 和原始错误，可用 `errors.Is/As` 判断；回调不能修改已记录命令，不自动回滚或重放整批命令。
+提交成功后可用 `Dispatch(ctx, handle, commands)` 按顺序分派。`handle` 是一个 `func(context.Context, *pb.Command) error`，按 `command.Kind` 处理任务或通知，接收的是命令副本。首个失败返回 `DispatchError`，包含索引、命令 ID 和原始错误，可用 `errors.Is/As` 判断；不自动回滚或重放整批命令。
 
 内存接入协议测试覆盖丢失分派、重复投递、旧控制事件和并发提交；库不提供生产存储、超时回收或恰好一次副作用保证。
 
@@ -103,11 +101,15 @@ flow, err := schedule.CompileStateflow(&pb.StateflowDefinition{
 if err != nil {
     return err
 }
-instance := flow.Start()
-nextState, step, err := flow.Advance(instance, "executing")
+state := flow.Initial()
+step, err := flow.Step(state, "executing")
+if err != nil {
+    return err
+}
+state = step.To
 ```
 
-支持任意状态名、自环、循环和单态图。`step.Event` 是转换输出标签；`HasNext(state)` 判断有无出边，`Restore(instance)` 验证并复制快照。合法自环仍返回转换信息，失败不修改输入；编译定义和运行快照互不共享可变数据。
+支持任意状态名、自环、循环和单态图。`step.Event` 是转换输出标签；`HasNext(state)` 判断有无出边。编译后的表只验证并查询转换，当前状态由业务保存；合法自环仍返回转换信息，输入定义和返回的转换均不与表共享可变数据。
 
 ## 目录与验证
 

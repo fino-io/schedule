@@ -7,10 +7,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Stateflow 仅索引独立业务状态流；实例只使用生成结构体，不维护第二份机器状态。
+// Stateflow 是不可变的业务转换表，当前状态由调用方保存。
 type Stateflow struct {
-	definition *pb.StateflowDefinition
-	steps      map[string]map[string]*pb.StateflowStep
+	initial string
+	steps   map[string]map[string]*pb.StateflowStep
 }
 
 func CompileStateflow(definition *pb.StateflowDefinition) (*Stateflow, error) {
@@ -19,11 +19,11 @@ func CompileStateflow(definition *pb.StateflowDefinition) (*Stateflow, error) {
 	}
 
 	flow := &Stateflow{
-		definition: proto.Clone(definition).(*pb.StateflowDefinition),
-		steps:      map[string]map[string]*pb.StateflowStep{definition.Init: {}},
+		initial: definition.Init,
+		steps:   map[string]map[string]*pb.StateflowStep{definition.Init: {}},
 	}
 
-	for _, step := range flow.definition.Steps {
+	for _, step := range definition.Steps {
 		if step == nil || step.From == "" || step.To == "" || !validText(step.From, step.To, step.Event) {
 			return nil, fmt.Errorf("%w: transition endpoints are required", ErrInvalidDefinition)
 		}
@@ -37,41 +37,28 @@ func CompileStateflow(definition *pb.StateflowDefinition) (*Stateflow, error) {
 			return nil, fmt.Errorf("%w: duplicate transition %q -> %q", ErrInvalidDefinition, step.From, step.To)
 		}
 
-		flow.steps[step.From][step.To] = step
+		flow.steps[step.From][step.To] = proto.Clone(step).(*pb.StateflowStep)
 	}
 
 	return flow, nil
 }
 
-func (f *Stateflow) Start() *pb.StateflowInstance {
-	return &pb.StateflowInstance{
-		Definition: proto.Clone(f.definition).(*pb.StateflowDefinition),
-		State:      f.definition.Init,
-	}
+func (f *Stateflow) Initial() string {
+	return f.initial
 }
 
-func (f *Stateflow) Restore(instance *pb.StateflowInstance) (*pb.StateflowInstance, error) {
-	if instance == nil || !proto.Equal(instance.Definition, f.definition) || f.steps[instance.State] == nil {
-		return nil, fmt.Errorf("%w: stateflow definition or state does not match", ErrInvalidSnapshot)
+// Step 查询合法转换并返回副本，不保存或修改调用方的当前状态。
+func (f *Stateflow) Step(state, target string) (*pb.StateflowStep, error) {
+	steps, exists := f.steps[state]
+	if !exists {
+		return nil, fmt.Errorf("%w: state %q", ErrNotFound, state)
 	}
-	return proto.Clone(instance).(*pb.StateflowInstance), nil
-}
-
-// Advance 返回新的实例和转换标签，支持合法自环，失败时不改变输入。
-func (f *Stateflow) Advance(instance *pb.StateflowInstance, target string) (*pb.StateflowInstance, *pb.StateflowStep, error) {
-	next, err := f.Restore(instance)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	step := f.steps[instance.State][target]
+	step := steps[target]
 	if step == nil {
-		return nil, nil, fmt.Errorf("%w: cannot transition from %q to %q", ErrInvalidEvent, instance.State, target)
+		return nil, fmt.Errorf("%w: cannot transition from %q to %q", ErrInvalidEvent, state, target)
 	}
 
-	next.State = target
-
-	return next, proto.Clone(step).(*pb.StateflowStep), nil
+	return proto.Clone(step).(*pb.StateflowStep), nil
 }
 
 func (f *Stateflow) HasNext(state string) (bool, error) {

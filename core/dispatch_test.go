@@ -15,20 +15,13 @@ type receiver struct {
 	fail error
 }
 
-func (r *receiver) OnTask(_ context.Context, command *pb.Command) error {
-	r.ids = append(r.ids, command.Id)
-	command.Task.Id = "mutated"
-	return r.fail
-}
-
-func (r *receiver) OnState(_ context.Context, command *pb.Command) error {
+func (r *receiver) handle(_ context.Context, command *pb.Command) error {
 	r.ids = append(r.ids, command.Id)
 	command.State.NodeId = "mutated"
-	return nil
-}
-
-func (r *receiver) OnEnd(_ context.Context, command *pb.Command) error {
-	r.ids = append(r.ids, command.Id)
+	if command.Kind == pb.CommandKind_COMMAND_KIND_TASK {
+		command.Task.Id = "mutated"
+		return r.fail
+	}
 	return nil
 }
 
@@ -39,7 +32,7 @@ func TestDispatch(t *testing.T) {
 	failure := errors.New("worker unavailable")
 	r := &receiver{fail: failure}
 
-	err := Dispatch(context.Background(), r, initial.Commands)
+	err := Dispatch(context.Background(), r.handle, initial.Commands)
 	var dispatchError *DispatchError
 	if !errors.Is(err, failure) || !errors.As(err, &dispatchError) || dispatchError.Index != 1 {
 		t.Fatalf("dispatch error=%v", err)
@@ -49,12 +42,12 @@ func TestDispatch(t *testing.T) {
 	}
 
 	r.fail = nil
-	if err := Dispatch(context.Background(), r, initial.Commands[dispatchError.Index:]); err != nil {
+	if err := Dispatch(context.Background(), r.handle, initial.Commands[dispatchError.Index:]); err != nil {
 		t.Fatal(err)
 	}
 
 	finished := advance(t, w, initial, report(initial.Instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED))
-	if err := Dispatch(context.Background(), r, finished.Commands); err != nil {
+	if err := Dispatch(context.Background(), r.handle, finished.Commands); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(commands(finished, pb.CommandKind_COMMAND_KIND_END), []string{"a"}) {
@@ -64,13 +57,13 @@ func TestDispatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	count := len(r.ids)
-	if err := Dispatch(ctx, r, initial.Commands); !errors.Is(err, context.Canceled) || len(r.ids) != count {
+	if err := Dispatch(ctx, r.handle, initial.Commands); !errors.Is(err, context.Canceled) || len(r.ids) != count {
 		t.Fatal("canceled dispatch invoked a callback")
 	}
 	if err := Dispatch(context.Background(), nil, initial.Commands); !errors.Is(err, ErrInvalidCommand) {
 		t.Fatal(err)
 	}
-	if err := Dispatch(context.Background(), r, []*pb.Command{nil}); !errors.Is(err, ErrInvalidCommand) {
+	if err := Dispatch(context.Background(), r.handle, []*pb.Command{nil}); !errors.Is(err, ErrInvalidCommand) {
 		t.Fatal(err)
 	}
 }
@@ -111,7 +104,7 @@ func TestDispatchRejectsCorruptedCommands(t *testing.T) {
 		change(command)
 		receiver := &receiver{}
 
-		if err := Dispatch(context.Background(), receiver, []*pb.Command{command}); !errors.Is(err, ErrInvalidCommand) || len(receiver.ids) != 0 {
+		if err := Dispatch(context.Background(), receiver.handle, []*pb.Command{command}); !errors.Is(err, ErrInvalidCommand) || len(receiver.ids) != 0 {
 			t.Fatal("invalid command reached a callback")
 		}
 	}

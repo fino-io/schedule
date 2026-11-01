@@ -8,13 +8,13 @@ Schedule 是一个可嵌入 Go 系统的静态任务树编排核心。它根据�
 | --- | --- |
 | `proto/schedule/` | 唯一数据契约：任务树、实例、事件、命令和独立状态流 |
 | `go/schedule/` | Fino 生成的 Go 类型及枚举支持，不手改 |
-| `core/task.go` | `Task/Seq/All/Any` 装配、`Append` 局部检查、错误与生命周期常量 |
+| `core/task.go` | `Task/Seq/All/Any` 装配、错误与生命周期常量 |
 | `core/compile.go` | 整树校验、不可变定义副本、指纹、节点及父子索引、查询 |
 | `core/workflow.go` | `Start/Advance`：初始化、事件校验、更新副本、修订号控制 |
 | `core/reduce.go` | `resolve` 汇总组合结果；`reconcile` 激活、阻止分派及收尾 |
 | `core/snapshot.go` | `Restore`：校验并复制快照，推导结果就绪和收尾视图 |
 | `core/command.go` | 从阶段及控制模式变化生成命令，校验命令基本结构与标识 |
-| `core/scheduler.go` | 顺序调用 `Scheduler` 回调，保留取消和错误链 |
+| `core/dispatch.go` | 将命令交给单个处理函数，保留顺序、取消和错误链 |
 | `core/stateflow.go` | 独立业务状态流，按 `(from, to)` 查询转换 |
 | `core/*_test.go` | 编译、生命周期、组合语义、快照、分派及接入协议测试 |
 | `docs/schedule/`、`openapi/` | Fino 生成的契约文档与 JSON Schema |
@@ -27,7 +27,7 @@ Schedule 是一个可嵌入 Go 系统的静态任务树编排核心。它根据�
 
 ```mermaid
 flowchart LR
-    Definition[任务定义] --> Compile[Compile：校验、复制、索引]
+    Root[根节点] --> Compile[Compile：校验、复制、索引]
     Compile --> Workflow[不可变 Workflow]
     Workflow --> Start[Start]
     Snapshot[已有快照] --> Restore[Restore：校验并复制]
@@ -37,15 +37,15 @@ flowchart LR
     Advance --> Reduce
     Reduce --> Transition[新快照与命令]
     Transition --> Commit[接入方原子提交]
-    Commit --> Dispatch[Dispatch / Scheduler]
+    Commit --> Dispatch[Dispatch / handle]
 ```
 
-- `Compile` 先验证输入树，再复制和建立索引，避免复制循环结构。拒绝空组合、重复 ID、共享节点和循环；深度上限 256，节点上限 10,000。任务的业务元数据由执行器解释。
+- `Compile(root)` 直接接收根节点，先验证输入树，再复制和建立索引，避免复制循环结构。定义指纹基于根节点的确定性编码。拒绝空组合、重复 ID、共享节点和循环；深度上限 256，节点上限 10,000。任务的业务元数据由执行器解释。
 - `Start(instanceID)` 初始化快照和首批命令。同 ID、同定义计算结果相同，创建是否重复由接入方原子判断。
 - `Restore(instance)` 校验身份、节点顺序、执行标识、依赖和组合决策；在唯一副本上复用归约规则检查一致性，成功后返回该副本，不重新产生命令。
 - `Advance(instance, event)` 复用 `Restore` 返回的副本。先更新叶子并向祖先传播结果，再遍历活跃子树；最后递增修订号并生成命令。输入始终保持不变。
 
-编译后的 `Workflow` 不持有实例状态，可以并发复用。`Definition/Node/Path` 返回副本；每个实例的事件仍须由接入方串行提交。
+编译前直接装配和追加 `Node.Children`，完整检查统一在 `Compile` 完成。编译后的 `Workflow` 不持有实例状态，可以并发复用。`Root/Node/Path` 返回副本；每个实例的事件仍须由接入方串行提交。
 
 ## 固定执行规则
 
@@ -81,7 +81,7 @@ flowchart LR
 
 命令固定按状态通知、任务分派、结束通知排列，同类按定义顺序排列。任务命令包含完整叶子定义；状态和结束通知包含对应节点状态。命令 ID 稳定，任务分派与逻辑执行共用 ID；`END` 只在首次全部收尾时生成。快照、命令和回调参数之间不共享可变数据。
 
-`Dispatch` 在首个错误或取消时停止，返回包含位置、命令 ID 和原始错误的 `DispatchError`。命令校验只检查基本结构与标识，不替代完整快照校验或执行器的业务检查。
+`Dispatch(ctx, handle, commands)` 只接收一个命令处理函数，由接入方按 `command.Kind` 处理任务或通知。在首个错误或取消时停止，返回包含位置、命令 ID 和原始错误的 `DispatchError`。命令校验只检查基本结构与标识，不替代完整快照校验或执行器的业务检查。
 
 ## 接入方责任
 
@@ -96,7 +96,7 @@ flowchart LR
 
 - 当前模型只支持静态树。跨分支依赖、动态扩图、循环工作流、补偿和全局配额需要新的实际用例，不能靠增加类型和策略参数提前覆盖。
 - `Advance` 每次仍需 O(N) 的完整快照复制与命令扫描，校验还会检查依赖和跳过来源。结果汇总先沿祖先传播，调度再遍历活跃子树；已有 1,000 任务基准，尚无增量缓存或大规模吞吐承诺。
-- 独立 `Stateflow` 保留简单转换表和生成快照，不参与任务生命周期。其快照携带定义，推进会比较并复制定义；只有实际出现大状态图或高频推进需求时，再调整这项契约。
+- 独立 `Stateflow` 只保存初始状态和转换表。`Initial()` 返回初始状态，`Step(from, to)` 查询合法转换，`HasNext(state)` 判断有无出边；业务保存当前状态及所属定义。它不参与任务生命周期，也不提供实例快照或恢复协议。
 - 生成枚举的 JSON 支持依赖 Fino 共享运行时。若要缩减这部分传递依赖，应修改生成选项或生成器，不能删除受管文件绕过归属。
 - `skills/` 和 `.fino/issues/` 属于协作工具，不进入运行链路。本项目没有 backend、frontend、数据库或应用发布配置。
 

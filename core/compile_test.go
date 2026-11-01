@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestCompileDefinition(t *testing.T) {
+func TestCompileTree(t *testing.T) {
 	branch := Any("branch", Task("a"), Seq("nested", Task("b"), Task("c")))
 	root := Seq("root", branch)
 	w := mustCompile(t, root)
@@ -22,14 +22,14 @@ func TestCompileDefinition(t *testing.T) {
 	}
 
 	branch.Id = "mutated"
-	definition := w.Definition()
-	definition.Root.Id = "mutated"
+	copy := w.Root()
+	copy.Id = "mutated"
 	node, err := w.Node("a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	node.Id = "mutated"
-	if _, err := w.Node("a"); err != nil || w.Definition().Root.Id != "root" {
+	if _, err := w.Node("a"); err != nil || w.Root().Id != "root" {
 		t.Fatal("compiled definition exposed mutable data")
 	}
 
@@ -74,7 +74,7 @@ func TestCompileRejectsInvalidTrees(t *testing.T) {
 	}
 	for name, root := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Compile(&pb.Definition{Root: root}); !errors.Is(err, ErrInvalidDefinition) {
+			if _, err := Compile(root); !errors.Is(err, ErrInvalidDefinition) {
 				t.Fatalf("invalid definition accepted: %v", err)
 			}
 		})
@@ -90,12 +90,12 @@ func TestCompileLimits(t *testing.T) {
 		items[i] = Task(fmt.Sprint(i))
 	}
 	root := All("root", items...)
-	if _, err := Compile(&pb.Definition{Root: root}); err != nil {
+	if _, err := Compile(root); err != nil {
 		t.Fatal(err)
 	}
 
 	root.Children = append(root.Children, Task("extra"))
-	if _, err := Compile(&pb.Definition{Root: root}); !errors.Is(err, ErrInvalidDefinition) {
+	if _, err := Compile(root); !errors.Is(err, ErrInvalidDefinition) {
 		t.Fatal("node limit not enforced")
 	}
 }
@@ -137,12 +137,12 @@ func BenchmarkCompile(b *testing.B) {
 	for i := range items {
 		items[i] = Task(fmt.Sprint(i))
 	}
-	definition := &pb.Definition{Root: All("root", items...)}
+	root := All("root", items...)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if _, err := Compile(definition); err != nil {
+		if _, err := Compile(root); err != nil {
 			b.Fatal(err)
 		}
 	}

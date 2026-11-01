@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	pb "github.com/fino-io/schedule/go/schedule"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestIndependentStateflow(t *testing.T) {
@@ -39,41 +38,34 @@ func TestIndependentStateflow(t *testing.T) {
 	}
 
 	definition.Init = "mutated"
-	instance := flow.Start()
-	if hasNext, err := flow.HasNext(instance.State); !hasNext || err != nil {
+	definition.Steps[0].To = "mutated"
+	state := flow.Initial()
+	if hasNext, err := flow.HasNext(state); !hasNext || err != nil {
 		t.Fatal("underscore state incorrectly terminal")
 	}
-	before := proto.Clone(instance)
-	if _, _, err := flow.Advance(instance, "b_c"); !errors.Is(err, ErrInvalidEvent) || !proto.Equal(before, instance) {
-		t.Fatal("colliding edge accepted or input mutated")
+	if _, err := flow.Step(state, "b_c"); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatal("colliding edge accepted")
 	}
 
 	for _, target := range []string{"c", "a", "a", "b_c"} {
-		next, step, err := flow.Advance(instance, target)
-		if err != nil || step.From != instance.State || step.To != target {
+		step, err := flow.Step(state, target)
+		if err != nil || step.From != state || step.To != target {
 			t.Fatalf("transition=%v error=%v", step, err)
 		}
 		if target == "a" && step.From == "a" && step.Event != "self" {
 			t.Fatal("self-loop lost event label")
 		}
-		instance = next
+		state = step.To
+		step.To = "mutated"
+		repeated, err := flow.Step(step.From, target)
+		if err != nil || repeated.To != target {
+			t.Fatal("returned step exposed the transition table")
+		}
 	}
-	if hasNext, err := flow.HasNext(instance.State); hasNext || err != nil {
+	if hasNext, err := flow.HasNext(state); hasNext || err != nil {
 		t.Fatal("terminal state has outgoing edge")
 	}
 
-	data, err := proto.Marshal(instance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded := &pb.StateflowInstance{}
-	if err := proto.Unmarshal(data, decoded); err != nil {
-		t.Fatal(err)
-	}
-	restored, err := flow.Restore(decoded)
-	if err != nil || !proto.Equal(restored, instance) {
-		t.Fatal("snapshot round-trip failed")
-	}
 	if _, err := flow.HasNext("missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
@@ -119,19 +111,13 @@ func TestStateflowBoundaries(t *testing.T) {
 		t.Fatal("single-state flow should be terminal")
 	}
 
-	for _, snapshot := range []*pb.StateflowInstance{
-		nil,
-		{
-			Definition: &pb.StateflowDefinition{Init: "other"},
-			State:      "other",
-		},
-		{
-			Definition: &pb.StateflowDefinition{Init: "only"},
-			State:      "missing",
-		},
-	} {
-		if _, err := flow.Restore(snapshot); !errors.Is(err, ErrInvalidSnapshot) {
-			t.Fatal("invalid snapshot accepted")
-		}
+	if flow.Initial() != "only" {
+		t.Fatal("initial state was lost")
+	}
+	if _, err := flow.Step("missing", "only"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("unknown state accepted")
+	}
+	if _, err := flow.Step("only", "only"); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatal("single-state flow accepted an undeclared self-loop")
 	}
 }

@@ -8,12 +8,10 @@ import (
 )
 
 func ExampleWorkflow() {
-	workflow, err := schedule.Compile(&pb.Definition{
-		Root: schedule.Seq("root",
-			schedule.Any("source", schedule.Task("primary"), schedule.Task("backup")),
-			schedule.Task("publish"),
-		),
-	})
+	workflow, err := schedule.Compile(schedule.Seq("root",
+		schedule.Any("source", schedule.Task("primary"), schedule.Task("backup")),
+		schedule.Task("publish"),
+	))
 	if err != nil {
 		panic(err)
 	}

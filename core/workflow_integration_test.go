@@ -50,20 +50,10 @@ type idempotentQueue struct {
 	jobs map[string]*pb.Node
 }
 
-func (q *idempotentQueue) OnTask(_ context.Context, command *pb.Command) error {
-	if !q.seen[command.Id] {
-		q.seen[command.Id] = true
+func (q *idempotentQueue) handle(_ context.Context, command *pb.Command) error {
+	if command.Kind == pb.CommandKind_COMMAND_KIND_TASK && !q.seen[command.Id] {
 		q.jobs[command.Id] = command.Task
 	}
-	return nil
-}
-
-func (q *idempotentQueue) OnState(_ context.Context, command *pb.Command) error {
-	q.seen[command.Id] = true
-	return nil
-}
-
-func (q *idempotentQueue) OnEnd(_ context.Context, command *pb.Command) error {
 	q.seen[command.Id] = true
 	return nil
 }
@@ -96,7 +86,7 @@ func TestCrashRecoveryAndDeliveryProtocol(t *testing.T) {
 	}
 	store.instance = restored.Instance
 	for range 2 {
-		if err := Dispatch(context.Background(), queue, store.outbox); err != nil {
+		if err := Dispatch(context.Background(), queue.handle, store.outbox); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -119,7 +109,7 @@ func TestCrashRecoveryAndDeliveryProtocol(t *testing.T) {
 	if err := store.accept(w, conflict); !errors.Is(err, ErrConflict) {
 		t.Fatal("same event ID with another payload accepted")
 	}
-	if err := Dispatch(context.Background(), queue, store.outbox); err != nil || len(queue.jobs) != 2 {
+	if err := Dispatch(context.Background(), queue.handle, store.outbox); err != nil || len(queue.jobs) != 2 {
 		t.Fatal("successor was lost or duplicated")
 	}
 

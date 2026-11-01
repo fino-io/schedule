@@ -17,15 +17,14 @@ const (
 
 // Workflow 是可并发复用的不可变定义和索引，不保存任何实例的运行状态。
 type Workflow struct {
-	definition *pb.Definition
-	hash       string
-	nodes      []*pb.Node
-	byID       map[string]int
-	parent     []int
-	children   [][]int
+	hash     string
+	nodes    []*pb.Node
+	byID     map[string]int
+	parent   []int
+	children [][]int
 }
 
-func Compile(definition *pb.Definition) (*Workflow, error) {
+func Compile(root *pb.Node) (*Workflow, error) {
 	ids := make(map[string]bool)
 	var validate func(*pb.Node, int) error
 	validate = func(node *pb.Node, depth int) error {
@@ -55,16 +54,14 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 
 		return nil
 	}
-	if err := validate(definition.GetRoot(), 1); err != nil {
+	if err := validate(root, 1); err != nil {
 		return nil, err
 	}
 
-	w := &Workflow{
-		definition: proto.Clone(definition).(*pb.Definition),
-		byID:       make(map[string]int, len(ids)),
-	}
+	root = proto.Clone(root).(*pb.Node)
+	w := &Workflow{byID: make(map[string]int, len(ids))}
 
-	data, err := (proto.MarshalOptions{Deterministic: true}).Marshal(w.definition)
+	data, err := (proto.MarshalOptions{Deterministic: true}).Marshal(root)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidDefinition, err)
 	}
@@ -88,13 +85,13 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 		return i
 	}
 
-	index(w.definition.Root, -1)
+	index(root, -1)
 
 	return w, nil
 }
 
-func (w *Workflow) Definition() *pb.Definition {
-	return proto.Clone(w.definition).(*pb.Definition)
+func (w *Workflow) Root() *pb.Node {
+	return proto.Clone(w.nodes[0]).(*pb.Node)
 }
 
 func (w *Workflow) Node(id string) (*pb.Node, error) {

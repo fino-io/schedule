@@ -2,7 +2,6 @@ package schedule
 
 import (
 	"errors"
-	"fmt"
 
 	pb "github.com/fino-io/schedule/go/schedule"
 )
@@ -12,7 +11,7 @@ var (
 	ErrInvalidSnapshot   = errors.New("invalid snapshot")
 	ErrInvalidEvent      = errors.New("invalid event")
 	ErrConflict          = errors.New("conflict")
-	ErrNotFound          = errors.New("node not found")
+	ErrNotFound          = errors.New("not found")
 	ErrInvalidCommand    = errors.New("invalid command")
 )
 
@@ -64,22 +63,6 @@ func Any(id string, children ...*pb.Node) *pb.Node {
 		Kind:     any,
 		Children: append([]*pb.Node(nil), children...),
 	}
-}
-
-// Append 只检查装配参数；整树约束在 Compile 一次完成，允许先挂空组合再填充。
-func Append(parent *pb.Node, children ...*pb.Node) error {
-	if parent == nil || (parent.Kind != seq && parent.Kind != all && parent.Kind != any) {
-		return fmt.Errorf("%w: parent must be a combination", ErrInvalidDefinition)
-	}
-
-	for _, child := range children {
-		if child == nil || child == parent {
-			return fmt.Errorf("%w: nil child or direct self-reference", ErrInvalidDefinition)
-		}
-	}
-
-	parent.Children = append(parent.Children, children...)
-	return nil
 }
 
 func terminal(phase pb.Phase) bool {
