@@ -61,7 +61,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 	visit(0, instance.Mode == modeRunning, "")
 }
 
-// resolve 只锁定组合结果，不分派工作；preferred 是本次报告影响的直接子项。
+// resolve 只锁定组合结果，不分派工作；preferred 是本次报告影响或恢复校验指定的直接子项。
 func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 	state, node := instance.Nodes[i], w.nodes[i]
 	if state.Phase != running || node.Kind == task {

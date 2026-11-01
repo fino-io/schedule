@@ -138,3 +138,91 @@ func TestSnapshotAnyWinner(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotPreservesLockedDecisions(t *testing.T) {
+	for _, kind := range []pb.NodeKind{all, any} {
+		t.Run(kind.String(), func(t *testing.T) {
+			w := mustCompile(t, &pb.Node{
+				Id:       "root",
+				Kind:     kind,
+				Children: []*pb.Node{Task("a"), Task("b")},
+			})
+			current := start(t, w)
+			eventKind := pb.EventKind_EVENT_KIND_FAILED
+			if kind == any {
+				eventKind = pb.EventKind_EVENT_KIND_SUCCEEDED
+			}
+			for _, id := range []string{"b", "a"} {
+				event := report(current.Instance, id, eventKind)
+				event.ResultRef = "result:" + id
+				current = advance(t, w, current, event)
+			}
+
+			before := proto.Clone(current.Instance)
+			restored, err := w.Restore(current.Instance)
+			if err != nil || !proto.Equal(before, restored.GetInstance()) || len(restored.GetCommands()) != 0 {
+				t.Fatalf("restore changed the locked decision: %v", err)
+			}
+			root := restored.Instance.Nodes[0]
+			if kind == all && root.CauseId != "b" || kind == any && (root.WinnerId != "b" || root.ResultRef != "result:b") {
+				t.Fatal("restore chose definition order instead of the accepted decision")
+			}
+
+			root.CauseId, root.WinnerId = "mutated", "mutated"
+			restored.Instance.Nodes[1].ResultRef = "mutated"
+			if !proto.Equal(before, current.Instance) {
+				t.Fatal("restored snapshot shares mutable state with its input")
+			}
+		})
+	}
+}
+
+func TestSnapshotRejectsInconsistentCombinationResults(t *testing.T) {
+	for _, kind := range []pb.NodeKind{seq, all, any} {
+		for _, eventKind := range []pb.EventKind{pb.EventKind_EVENT_KIND_SUCCEEDED, pb.EventKind_EVENT_KIND_FAILED} {
+			t.Run(kind.String()+"/"+eventKind.String(), func(t *testing.T) {
+				w := mustCompile(t, &pb.Node{
+					Id:       "root",
+					Kind:     kind,
+					Children: []*pb.Node{Task("a"), Task("b")},
+				})
+				current := start(t, w)
+				for _, id := range []string{"a", "b"} {
+					if nodeState(current.Instance, id).Phase != skipped {
+						current = advance(t, w, current, report(current.Instance, id, eventKind))
+					}
+				}
+
+				for name, mutate := range map[string]func(*pb.NodeState){
+					"phase": func(state *pb.NodeState) {
+						state.Phase = running
+					},
+					"winner": func(state *pb.NodeState) {
+						state.WinnerId = "root"
+					},
+					"cause": func(state *pb.NodeState) {
+						state.CauseId = "root"
+					},
+					"result": func(state *pb.NodeState) {
+						state.ResultRef = "forged"
+					},
+					"error": func(state *pb.NodeState) {
+						state.ErrorMessage = proto.String("forged")
+					},
+				} {
+					t.Run(name, func(t *testing.T) {
+						copy := proto.Clone(current.Instance).(*pb.Instance)
+						mutate(copy.Nodes[0])
+						before := proto.Clone(copy)
+						if _, err := w.Restore(copy); !errors.Is(err, ErrInvalidSnapshot) {
+							t.Fatalf("inconsistent result accepted: %v", err)
+						}
+						if !proto.Equal(before, copy) {
+							t.Fatal("failed restore modified its input")
+						}
+					})
+				}
+			})
+		}
+	}
+}

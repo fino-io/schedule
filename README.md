@@ -115,7 +115,7 @@ nextState, step, err := flow.Advance(instance, "executing")
 | --- | --- |
 | `proto/schedule/` | 数据契约源，无 service、HTTP 或数据库模型 |
 | `go/schedule/` | Fino 生成类型，不手工修改 |
-| `core/` | 任务装配、编译、归约、快照校验、独立状态流及回调适配 |
+| `core/` | 任务装配、编译、事件推进、归约、快照恢复、命令与回调分派；文件职责见架构说明 |
 | `docs/architecture.md` | 项目维护的架构与接入约定 |
 | `docs/schedule/`、`openapi/` | Fino 生成的契约文档和 JSON Schema |
 
@@ -130,4 +130,4 @@ go vet ./...
 cd go && go test ./...
 ```
 
-当前重构直接调整了契约和函数，不提供旧接口兼容层。仅生成 `api`，没有 backend、frontend、部署或应用二进制发布配置。
+本项目仅生成 `api`，没有 backend、frontend、部署或应用二进制发布配置。

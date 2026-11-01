@@ -3,7 +3,6 @@ package schedule
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	pb "github.com/fino-io/schedule/go/schedule"
 	"google.golang.org/protobuf/proto"
@@ -63,33 +62,4 @@ func Dispatch(ctx context.Context, scheduler Scheduler, commands []*pb.Command) 
 	}
 
 	return nil
-}
-
-func validCommand(command *pb.Command) bool {
-	if command == nil || command.Id == "" || command.InstanceId == "" ||
-		command.DefinitionHash == "" || command.Revision == 0 || command.State == nil {
-		return false
-	}
-
-	state := command.State
-	if state.NodeId == "" || state.Phase < pending || state.Phase > skipped ||
-		command.Mode < modeRunning || command.Mode > modeStopped ||
-		len(command.Path) == 0 || command.Path[len(command.Path)-1] != state.NodeId {
-		return false
-	}
-
-	switch command.Kind {
-	case pb.CommandKind_COMMAND_KIND_TASK:
-		return command.Task != nil && command.Task.Kind == task && len(command.Task.Children) == 0 &&
-			command.Task.Id == state.NodeId && state.Phase == ready &&
-			state.ExecutionId == command.Id && command.Id == executionID(command.InstanceId, state.NodeId)
-	case pb.CommandKind_COMMAND_KIND_STATE:
-		return command.Task == nil &&
-			command.Id == stableID("state", command.InstanceId, state.NodeId, strconv.FormatUint(command.Revision, 10))
-	case pb.CommandKind_COMMAND_KIND_END:
-		return command.Task == nil && len(command.Path) == 1 && terminal(state.Phase) &&
-			command.Id == stableID("end", command.InstanceId)
-	}
-
-	return false
 }
