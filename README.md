@@ -118,7 +118,7 @@ state = step.To
 | `docs/architecture.md` | 项目维护的架构与接入约定 |
 | `docs/schedule/`、`openapi/` | Fino 生成的契约文档和 JSON Schema |
 
-根 Go 模块通过 `replace github.com/fino-io/schedule/go => ./go` 使用同仓库 API。其他仓库接入时需发布对应 API 模块版本，或在自己的工作区关联本地模块。
+根模块和 `go/` API 是两个独立 Go 模块。本地消费方需通过工作区关联两者，或同时配置两个本地 `replace`；正式接入使用已发布且匹配的模块版本。具体命令见[消费方接入](docs/architecture.md#消费方接入)。
 
 ```bash
 fino doctor --output=. --targets=api

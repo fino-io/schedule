@@ -21,7 +21,32 @@ Schedule 是一个可嵌入 Go 系统的静态任务树编排核心。它根据�
 
 全部业务实现保持在一个 `core` 包。文件按职责组织，不增加 service、repository、策略注册表或通用 FSM 层。
 
-根 Go 模块通过 `replace` 使用同仓库 `go/` API 模块。两个模块分别承担实现和生成契约的归属；外部接入需要发布匹配版本，或在工作区关联本地 API 模块。
+根模块和 `go/` API 模块分别承担实现和生成契约的归属。库内 `replace` 只服务本仓库开发，不会传递给消费方，见 [Go 模块规则](https://go.dev/ref/mod#go-mod-file-replace)。
+
+## 消费方接入
+
+本地联调推荐使用工作区。假设消费方目录名为 `consumer`，与本仓库 `schedule` 放在同一父目录，在父目录执行：
+
+```bash
+go work init ./consumer ./schedule ./schedule/go
+cd consumer
+go test ./...
+```
+
+父目录已有 `go.work` 时，改用 `go work use ./consumer ./schedule ./schedule/go`。本地工作区引用无需添加占位 `require`；已有 `require` 应使用真实可获取的版本，避免模块图解析触发无效查询。
+
+不使用工作区时，在消费方的 `go.mod` 同时配置两个替换：
+
+```go
+replace (
+    github.com/fino-io/schedule => ../schedule
+    github.com/fino-io/schedule/go => ../schedule/go
+)
+```
+
+仅替换主模块时，消费方仍会按版本解析 API 模块，不能依赖库内的 `replace`。
+
+正式发布时，主模块使用根版本标签，例如 `vX.Y.Z`；API 子模块标签带 `go/` 前缀，例如 `go/vA.B.C`，见 [Go 版本标签规则](https://go.dev/ref/mod#vcs-version)。主模块 `go.mod` 要求的 API 版本必须可获取，消费方按发布版本更新依赖。
 
 ## 调用路径
 
