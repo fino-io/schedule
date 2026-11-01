@@ -18,7 +18,6 @@
 |---|---|---|---|---|---|
 | `nodeId` | `string` |  | 否 |  |  |
 | `phase` | [`schedule.Phase`](workflow.md#schedule-phase) |  | 否 |  |  |
-| `executionId` | `string` |  | 否 |  | 只供已产生分派意图的 Task 使用，重试不改变逻辑执行标识。 |
 | `errorMessage` | `string` |  | 否 |  | 未设置与显式空字符串不同；不能由文本恢复 Go 错误链。 |
 | `resultRef` | `string` |  | 否 |  | 由执行器管理的结果引用，不在快照内存放业务输出。 |
 | `winnerId` | `string` |  | 否 |  | Any 首次成功的直接子项，锁定后不再修改。 |
@@ -37,7 +36,7 @@ STARTED/SUCCEEDED/FAILED/STOPPED 是叶子报告，绑定实例、节点和逻�
 | `instanceId` | `string` |  | 否 |  |  |
 | `kind` | [`schedule.EventKind`](workflow.md#schedule-eventkind) |  | 否 |  |  |
 | `nodeId` | `string` |  | 否 |  |  |
-| `executionId` | `string` |  | 否 |  |  |
+| `executionId` | `string` |  | 否 |  | 原样回传 TASK 命令的 id，执行器内部重试不改变它。 |
 | `errorMessage` | `string` |  | 否 |  |  |
 | `resultRef` | `string` |  | 否 |  |  |
 
@@ -49,7 +48,7 @@ STARTED/SUCCEEDED/FAILED/STOPPED 是叶子报告，绑定实例、节点和逻�
 
 | 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|---|
-| `id` | `string` |  | 否 |  |  |
+| `id` | `string` |  | 否 |  | TASK 命令 id 同时作为逻辑执行标识，由实例 ID 和节点 ID 确定。 |
 | `instanceId` | `string` |  | 否 |  |  |
 | `definitionHash` | `string` |  | 否 |  |  |
 | `revision` | `integer` | `Uint64` | 否 |  |  |

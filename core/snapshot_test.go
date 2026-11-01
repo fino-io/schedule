@@ -41,10 +41,10 @@ func TestSnapshotIntegrity(t *testing.T) {
 			i.Nodes[0].Phase = pending
 		},
 		"group dispatch": func(i *pb.Instance) {
-			i.Nodes[0].ExecutionId = "invalid"
+			i.Nodes[0].Phase = ready
 		},
 		"leaf binding": func(i *pb.Instance) {
-			i.Nodes[1].ExecutionId = "wrong"
+			i.Nodes[1].NodeId = "wrong"
 		},
 		"premature error": func(i *pb.Instance) {
 			i.Nodes[1].ErrorMessage = proto.String("error")
@@ -62,13 +62,13 @@ func TestSnapshotIntegrity(t *testing.T) {
 			i.Nodes[2].Phase, i.Nodes[2].CauseId = skipped, "a"
 		},
 		"bypass dependency": func(i *pb.Instance) {
-			i.Nodes[2].Phase, i.Nodes[2].ExecutionId = ready, executionID(i.Id, "b")
+			i.Nodes[2].Phase = ready
 		},
 		"missing propagation": func(i *pb.Instance) {
 			i.Nodes[1].Phase = succeeded
 		},
 		"missing activation": func(i *pb.Instance) {
-			i.Nodes[1].Phase, i.Nodes[1].ExecutionId = pending, ""
+			i.Nodes[1].Phase = pending
 		},
 	}
 	for name, mutation := range mutations {

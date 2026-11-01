@@ -65,9 +65,9 @@ func FuzzWorkflow(f *testing.F) {
 				issued[command.Id] = true
 			}
 			var active []string
-			for _, state := range current.Instance.Nodes {
-				if state.ExecutionId != "" {
-					if !issued[state.ExecutionId] {
+			for i, state := range current.Instance.Nodes {
+				if w.nodes[i].Kind == task && activated(state.Phase) {
+					if !issued[executionID(current.Instance.Id, state.NodeId)] {
 						t.Fatal("execution has no dispatch command")
 					}
 					if !terminal(state.Phase) {

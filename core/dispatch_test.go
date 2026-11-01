@@ -94,7 +94,7 @@ func TestDispatchRejectsCorruptedCommands(t *testing.T) {
 			c.Mode = pb.Mode_MODE_UNSPECIFIED
 		},
 		func(c *pb.Command) {
-			c.State.ExecutionId = "wrong"
+			c.State.NodeId = "wrong"
 		},
 		func(c *pb.Command) {
 			c.State.Phase = succeeded

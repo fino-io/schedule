@@ -33,19 +33,13 @@ func start(t testing.TB, w *Workflow) *pb.Transition {
 }
 
 func report(instance *pb.Instance, id string, kind pb.EventKind) *pb.Event {
-	event := &pb.Event{
-		Id:         fmt.Sprintf("event-%d-%s-%d", instance.Revision, id, kind),
-		InstanceId: instance.Id,
-		Kind:       kind,
-		NodeId:     id,
+	return &pb.Event{
+		Id:          fmt.Sprintf("event-%d-%s-%d", instance.Revision, id, kind),
+		InstanceId:  instance.Id,
+		Kind:        kind,
+		NodeId:      id,
+		ExecutionId: executionID(instance.Id, id),
 	}
-	for _, state := range instance.Nodes {
-		if state.NodeId == id {
-			event.ExecutionId = state.ExecutionId
-		}
-	}
-
-	return event
 }
 
 func control(instance *pb.Instance, kind pb.EventKind) *pb.Event {

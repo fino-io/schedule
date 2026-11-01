@@ -29,7 +29,6 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 
 			if node.Kind == task {
 				state.Phase = ready
-				state.ExecutionId = executionID(instance.Id, node.Id)
 			} else {
 				state.Phase = running
 			}

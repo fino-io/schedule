@@ -30,17 +30,11 @@ func (w *Workflow) Restore(instance *pb.Instance) (*pb.Transition, error) {
 	normalized := proto.Clone(instance).(*pb.Instance)
 	for i := len(w.nodes) - 1; i >= 0; i-- {
 		node, state := w.nodes[i], instance.Nodes[i]
-		active := activated(state.Phase)
 		bad := func(reason string) error {
 			return fmt.Errorf("%w: node %q: %s", ErrInvalidSnapshot, node.Id, reason)
 		}
 
 		if node.Kind == task {
-			if active && state.ExecutionId != executionID(instance.Id, node.Id) ||
-				!active && state.ExecutionId != "" {
-				return nil, bad("execution identity")
-			}
-
 			if state.WinnerId != "" || state.Phase != skipped && state.CauseId != "" {
 				return nil, bad("leaf has combination metadata")
 			}
@@ -49,10 +43,11 @@ func (w *Workflow) Restore(instance *pb.Instance) (*pb.Transition, error) {
 				return nil, bad("result attached to a non-result state")
 			}
 		} else {
-			if state.ExecutionId != "" || state.Phase == ready {
+			if state.Phase == ready {
 				return nil, bad("combination cannot be dispatched")
 			}
 
+			active := activated(state.Phase)
 			prefixSucceeded, hasActiveChild := true, false
 			for _, child := range node.children {
 				phase := instance.Nodes[child].Phase

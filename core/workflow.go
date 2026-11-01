@@ -71,9 +71,9 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 		next.Mode = targetMode
 	} else {
 		i, exists := w.byID[event.NodeId]
-		// Restore 已保证未分派任务的执行标识为空，非空绑定同时检查分派资格。
-		if !exists || w.nodes[i].Kind != task ||
-			event.ExecutionId == "" || event.ExecutionId != next.Nodes[i].ExecutionId {
+		// 执行标识可预测，仍须先检查叶子已分派，避免报告绕过依赖。
+		if !exists || w.nodes[i].Kind != task || !activated(next.Nodes[i].Phase) ||
+			event.ExecutionId != executionID(instance.Id, event.NodeId) {
 			return nil, fmt.Errorf("%w: node or execution binding", ErrInvalidEvent)
 		}
 		state := next.Nodes[i]

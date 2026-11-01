@@ -21,7 +21,7 @@ func TestWorkflowTaskLifecycleAndDeterminism(t *testing.T) {
 	}
 
 	other, err := w.Start("other")
-	if err != nil || nodeState(first.Instance, "a").ExecutionId == nodeState(other.Instance, "a").ExecutionId {
+	if err != nil || first.Commands[1].Id == other.Commands[1].Id {
 		t.Fatal("execution IDs not scoped to instance")
 	}
 	if _, err := w.Start(""); err == nil {
@@ -134,7 +134,7 @@ func TestWorkflowEventValidation(t *testing.T) {
 			InstanceId:  "run",
 			Kind:        pb.EventKind_EVENT_KIND_STARTED,
 			NodeId:      "root",
-			ExecutionId: "wrong",
+			ExecutionId: executionID("run", "root"),
 		},
 		{
 			Id:          "id",
@@ -150,6 +150,12 @@ func TestWorkflowEventValidation(t *testing.T) {
 			NodeId:      "a",
 			ExecutionId: "wrong",
 		},
+		{
+			Id:         "id",
+			InstanceId: "run",
+			Kind:       pb.EventKind_EVENT_KIND_SUCCEEDED,
+			NodeId:     "a",
+		},
 	}
 
 	badStart := report(initial.Instance, "a", pb.EventKind_EVENT_KIND_STARTED)
@@ -164,6 +170,30 @@ func TestWorkflowEventValidation(t *testing.T) {
 		if _, err := w.Advance(initial.Instance, event); !errors.Is(err, ErrInvalidEvent) || !proto.Equal(before, initial.Instance) {
 			t.Fatalf("invalid event accepted or mutated input: %v, %v", event, err)
 		}
+	}
+}
+
+func TestWorkflowRejectsUndispatchedReports(t *testing.T) {
+	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
+	initial := start(t, w)
+	stopped := advance(t, w, initial, control(initial.Instance, pb.EventKind_EVENT_KIND_STOP))
+	for _, instance := range []*pb.Instance{initial.Instance, stopped.Instance} {
+		t.Run(nodeState(instance, "b").Phase.String(), func(t *testing.T) {
+			before := proto.Clone(instance)
+			for _, kind := range []pb.EventKind{
+				pb.EventKind_EVENT_KIND_STARTED,
+				pb.EventKind_EVENT_KIND_SUCCEEDED,
+				pb.EventKind_EVENT_KIND_FAILED,
+				pb.EventKind_EVENT_KIND_STOPPED,
+			} {
+				// 即使猜中了正确的派生 ID，未分派或已跳过的节点也不能报告执行。
+				event := report(instance, "b", kind)
+				if next, err := w.Advance(instance, event); !errors.Is(err, ErrInvalidEvent) ||
+					next != nil || !proto.Equal(before, instance) {
+					t.Fatalf("undispatched report accepted or modified input: %v", err)
+				}
+			}
+		})
 	}
 }
 

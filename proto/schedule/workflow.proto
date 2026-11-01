@@ -56,8 +56,6 @@ message Instance {
 message NodeState {
   string node_id = 1;
   Phase phase = 2;
-  // 只供已产生分派意图的 Task 使用，重试不改变逻辑执行标识。
-  string execution_id = 3;
   // 未设置与显式空字符串不同；不能由文本恢复 Go 错误链。
   optional string error_message = 4;
   // 由执行器管理的结果引用，不在快照内存放业务输出。
@@ -76,6 +74,7 @@ message Event {
   string instance_id = 2;
   EventKind kind = 3;
   string node_id = 4;
+  // 原样回传 TASK 命令的 id，执行器内部重试不改变它。
   string execution_id = 5;
   optional string error_message = 6;
   string result_ref = 7;
@@ -84,6 +83,7 @@ message Event {
 // 自包含、可持久化的执行或通知意图。接入方按 id 幂等投递。
 // STATE 通知节点或根控制模式变化后的当前状态；END 只在首次全部收尾时产生。
 message Command {
+  // TASK 命令 id 同时作为逻辑执行标识，由实例 ID 和节点 ID 确定。
   string id = 1;
   string instance_id = 2;
   string definition_hash = 3;

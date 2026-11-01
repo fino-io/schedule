@@ -75,9 +75,12 @@ func TestPublicRecoveryAndDispatch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if tasks != 1 || task.Task.Id != "send" || task.State.ExecutionId != task.Id ||
+	if tasks != 1 || task.Task.Id != "send" || task.State.NodeId != task.Task.Id ||
 		task.InstanceId != current.Instance.Id || task.DefinitionHash != current.Instance.DefinitionHash {
 		t.Fatal("saved task command was not sufficient for dispatch")
+	}
+	if task.Id != "846fb15b35da245519641f7e879f353e63069c49236dc56dd538eb068645b188" {
+		t.Fatal("stable execution ID changed")
 	}
 
 	for _, control := range []struct {

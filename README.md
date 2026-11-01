@@ -45,7 +45,7 @@ next, err := workflow.Advance(initial.Instance, &pb.Event{
     InstanceId:  "run-42",
     Kind:        pb.EventKind_EVENT_KIND_SUCCEEDED,
     NodeId:      "primary",
-    ExecutionId: primary.State.ExecutionId,
+    ExecutionId: primary.Id,
     ResultRef:   "results/primary",
 })
 if err != nil {
@@ -65,11 +65,11 @@ if err != nil {
 - `workflow.Advance(instance, event)` 校验快照及事件，在副本上计算。非法事件不修改输入，重复开始或相同终态不产生新命令，冲突终态返回 `ErrConflict`。
 - `workflow.Restore(instance)` 验证定义绑定、节点状态和组合决策，返回独立快照与派生视图，不重新生成分派命令。
 
-用 `proto.Marshal/Unmarshal` 或 `protojson.Marshal/Unmarshal` 保存生成类型。快照中的节点按定义前序排列，不可重排。定义指纹不匹配、依赖被绕过、执行标识错误或结果汇总缺失时，恢复会返回 `ErrInvalidSnapshot`。
+用 `proto.Marshal/Unmarshal` 或 `protojson.Marshal/Unmarshal` 保存生成类型。快照中的节点按定义前序排列，不可重排。定义指纹不匹配、依赖被绕过或结果汇总缺失时，恢复会返回 `ErrInvalidSnapshot`。
 
 `Transition.ResultReady` 表示根结果已经确定；`Transition.Settled` 表示所有分支均已收尾。`Any` 可以提前发布成功结果，其余已激活分支及内部串行后继继续执行。祖先失败或实例停止会阻止相应范围内的新分派，暂停则暂缓后继，恢复后继续推进。
 
-控制通过 `Event` 的 `PAUSE/RESUME/STOP` 类型提交，实例 ID、事件 ID 必填，节点、执行标识和结果载荷留空。执行报告只接受 `Task` 节点，必须携带命令中的逻辑执行标识。停止不等于物理取消；已分派任务等待执行方的实际终态报告。节点重试由执行器完成，核心只接受最终逻辑结果；重跑整个流程使用新实例 ID。
+控制通过 `Event` 的 `PAUSE/RESUME/STOP` 类型提交，实例 ID、事件 ID 必填，节点、执行标识和结果载荷留空。执行报告只接受已分派的 `Task` 节点，`Event.ExecutionId` 必须原样回传任务命令的 `Id`。该标识由实例 ID 与节点 ID 确定，节点快照不重复保存它。停止不等于物理取消；已分派任务等待执行方的实际终态报告。节点重试由执行器完成，核心只接受最终逻辑结果；重跑整个流程使用新实例 ID。
 
 ## 命令与接入协议
 
@@ -77,12 +77,7 @@ if err != nil {
 
 状态通知表达当前状态，消费方按命令 ID 去重，并用修订号防止旧通知覆盖新状态；需要比较前后状态时保存自己的投影视图。层级路径通过 `workflow.Path(nodeID)` 按需查询。
 
-接入方必须保证：
-
-1. 事件去重记录、新快照和待分派命令在同一事务中提交，更新实例时检查旧修订号或持有实例锁。
-2. 使用命令 ID 幂等创建任务，保存后、入队前崩溃时补发原命令，不生成新 ID。
-3. 以事件 ID 去重；同 ID 不同内容视为冲突。核心的状态幂等不能阻止旧暂停事件在恢复后被重新应用。
-4. 可靠通知同样入库，重试投递由接入方负责。`END` 仅在首次全部收尾时生成，`Settled` 不代表通知已送达。
+接入方须原子保存事件去重记录、新快照与 outbox，串行更新同一实例，并按事件及命令 ID 幂等处理。保存后、分派前退出时补发已保存的命令。完整约定见[接入方责任](docs/architecture.md#接入方责任)。
 
 提交成功后可用 `Dispatch(ctx, handle, commands)` 按顺序分派。`handle` 是一个 `func(context.Context, *pb.Command) error`，按 `command.Kind` 处理任务或通知，接收的是命令副本。首个失败返回 `DispatchError`，包含索引、命令 ID 和原始错误，可用 `errors.Is/As` 判断；不自动回滚或重放整批命令。
 

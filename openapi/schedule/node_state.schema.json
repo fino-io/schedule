@@ -10,10 +10,6 @@
       "description": "未设置与显式空字符串不同；不能由文本恢复 Go 错误链。",
       "type": "string"
     },
-    "executionId": {
-      "description": "只供已产生分派意图的 Task 使用，重试不改变逻辑执行标识。",
-      "type": "string"
-    },
     "nodeId": {
       "type": "string"
     },

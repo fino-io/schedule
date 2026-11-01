@@ -7,6 +7,7 @@
       "type": "string"
     },
     "id": {
+      "description": "TASK 命令 id 同时作为逻辑执行标识，由实例 ID 和节点 ID 确定。",
       "type": "string"
     },
     "instanceId": {

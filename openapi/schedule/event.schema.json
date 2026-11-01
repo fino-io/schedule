@@ -7,6 +7,7 @@
       "type": "string"
     },
     "executionId": {
+      "description": "原样回传 TASK 命令的 id，执行器内部重试不改变它。",
       "type": "string"
     },
     "id": {

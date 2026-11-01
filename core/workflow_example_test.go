@@ -21,11 +21,11 @@ func ExampleWorkflow() {
 		panic(err)
 	}
 
+	executions := make(map[string]string)
 	for i, node := range []string{"primary", "publish", "backup"} {
-		var executionID string
-		for _, state := range current.Instance.Nodes {
-			if state.NodeId == node {
-				executionID = state.ExecutionId
+		for _, command := range current.Commands {
+			if command.Kind == pb.CommandKind_COMMAND_KIND_TASK {
+				executions[command.Task.Id] = command.Id
 			}
 		}
 		current, err = workflow.Advance(current.Instance, &pb.Event{
@@ -33,7 +33,7 @@ func ExampleWorkflow() {
 			InstanceId:  "run-42",
 			Kind:        pb.EventKind_EVENT_KIND_SUCCEEDED,
 			NodeId:      node,
-			ExecutionId: executionID,
+			ExecutionId: executions[node],
 		})
 		if err != nil {
 			panic(err)

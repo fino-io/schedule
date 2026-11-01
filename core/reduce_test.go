@@ -157,8 +157,9 @@ func TestMixedEventSequences(t *testing.T) {
 					}
 					issued[command.Id] = true
 				}
-				for _, state := range current.Instance.Nodes {
-					if state.ExecutionId != "" && !issued[state.ExecutionId] {
+				for i, state := range current.Instance.Nodes {
+					if w.nodes[i].Kind == task && activated(state.Phase) &&
+						!issued[executionID(current.Instance.Id, state.NodeId)] {
 						t.Fatal("execution has no command")
 					}
 				}
@@ -170,8 +171,8 @@ func TestMixedEventSequences(t *testing.T) {
 				}
 
 				var active []string
-				for _, state := range current.Instance.Nodes {
-					if state.ExecutionId != "" && !terminal(state.Phase) {
+				for i, state := range current.Instance.Nodes {
+					if w.nodes[i].Kind == task && (state.Phase == ready || state.Phase == running) {
 						active = append(active, state.NodeId)
 					}
 				}
