@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"errors"
+	"slices"
 
 	pb "github.com/fino-io/schedule/go/schedule"
 )
@@ -45,7 +46,7 @@ func Seq(id string, children ...*pb.Node) *pb.Node {
 	return &pb.Node{
 		Id:       id,
 		Kind:     seq,
-		Children: append([]*pb.Node(nil), children...),
+		Children: slices.Clone(children),
 	}
 }
 
@@ -53,7 +54,7 @@ func All(id string, children ...*pb.Node) *pb.Node {
 	return &pb.Node{
 		Id:       id,
 		Kind:     all,
-		Children: append([]*pb.Node(nil), children...),
+		Children: slices.Clone(children),
 	}
 }
 
@@ -61,10 +62,14 @@ func Any(id string, children ...*pb.Node) *pb.Node {
 	return &pb.Node{
 		Id:       id,
 		Kind:     any,
-		Children: append([]*pb.Node(nil), children...),
+		Children: slices.Clone(children),
 	}
 }
 
 func terminal(phase pb.Phase) bool {
 	return phase >= succeeded && phase <= skipped
+}
+
+func activated(phase pb.Phase) bool {
+	return phase >= ready && phase <= stopped
 }

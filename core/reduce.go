@@ -17,7 +17,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		if state.Phase == pending {
 			if blocker != "" {
 				state.Phase, state.CauseId = skipped, blocker
-				for _, child := range w.children[i] {
+				for _, child := range node.children {
 					visit(child, false, blocker)
 				}
 				return
@@ -48,7 +48,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		}
 
 		prefixSucceeded := true
-		for _, child := range w.children[i] {
+		for _, child := range node.children {
 			phase := instance.Nodes[child].Phase
 			canActivate := node.Kind != seq || prefixSucceeded || phase != pending
 			prefixSucceeded = prefixSucceeded && phase == succeeded
@@ -68,26 +68,14 @@ func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 		return
 	}
 
-	children := w.children[i]
+	children := node.children
 	fail := func(child int) {
 		state.Phase, state.CauseId = failed, w.nodes[child].Id
 	}
 
 	switch node.Kind {
-	case seq:
-		for _, child := range children {
-			phase := instance.Nodes[child].Phase
-			if phase != succeeded {
-				if terminal(phase) {
-					fail(child)
-				}
-				return
-			}
-		}
-		state.Phase = succeeded
-
-	case all:
-		if preferred >= 0 {
+	case seq, all:
+		if node.Kind == all && preferred >= 0 {
 			phase := instance.Nodes[preferred].Phase
 			if terminal(phase) && phase != succeeded {
 				fail(preferred)
@@ -98,11 +86,17 @@ func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 		complete := true
 		for _, child := range children {
 			phase := instance.Nodes[child].Phase
-			if terminal(phase) && phase != succeeded {
+			if phase == succeeded {
+				continue
+			}
+			if terminal(phase) {
 				fail(child)
 				return
 			}
-			complete = complete && phase == succeeded
+			if node.Kind == seq {
+				return
+			}
+			complete = false
 		}
 		if complete {
 			state.Phase = succeeded

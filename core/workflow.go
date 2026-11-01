@@ -56,14 +56,19 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 			return nil, fmt.Errorf("%w: stopped instance cannot pause or resume", ErrConflict)
 		}
 
+		var targetMode pb.Mode
 		switch event.Kind {
 		case pb.EventKind_EVENT_KIND_PAUSE:
-			next.Mode = modePaused
+			targetMode = modePaused
 		case pb.EventKind_EVENT_KIND_RESUME:
-			next.Mode = modeRunning
+			targetMode = modeRunning
 		case pb.EventKind_EVENT_KIND_STOP:
-			next.Mode = modeStopped
+			targetMode = modeStopped
 		}
+		if next.Mode == targetMode {
+			return restored, nil
+		}
+		next.Mode = targetMode
 	} else {
 		i, exists := w.byID[event.NodeId]
 		if !exists || w.nodes[i].Kind != task ||
@@ -98,30 +103,25 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 			return nil, fmt.Errorf("%w: unknown event kind", ErrInvalidEvent)
 		}
 
-		if terminal(state.Phase) {
-			candidate := proto.Clone(state).(*pb.NodeState)
-			candidate.Phase, candidate.ErrorMessage, candidate.ResultRef = target, event.ErrorMessage, event.ResultRef
-			if proto.Equal(candidate, state) {
+		state.Phase, state.ResultRef = target, event.ResultRef
+		state.ErrorMessage = nil
+		if event.ErrorMessage != nil {
+			state.ErrorMessage = proto.String(*event.ErrorMessage)
+		}
+		if terminal(instance.Nodes[i].Phase) {
+			if proto.Equal(state, instance.Nodes[i]) {
 				return restored, nil
 			}
 			return nil, fmt.Errorf("%w: task %q already has a different result", ErrConflict, event.NodeId)
 		}
 
-		state.Phase, state.ResultRef = target, event.ResultRef
-		if event.ErrorMessage != nil {
-			state.ErrorMessage = proto.String(*event.ErrorMessage)
-		}
-
 		// 在激活任何后继之前，先向上传播结果，使祖先失败能及时阻止分派。
-		for child, parent := i, w.parent[i]; parent >= 0; child, parent = parent, w.parent[parent] {
+		for child, parent := i, w.nodes[i].parent; parent >= 0; child, parent = parent, w.nodes[parent].parent {
 			w.resolve(next, parent, child)
 		}
 	}
 
 	w.reconcile(next)
-	if proto.Equal(instance, next) {
-		return restored, nil
-	}
 	if instance.Revision == math.MaxUint64 {
 		return nil, fmt.Errorf("%w: revision exhausted", ErrConflict)
 	}

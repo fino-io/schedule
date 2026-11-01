@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// transition 只用于初始化或未收尾实例的实际推进；重复事件在 Advance 中直接返回。
 func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 	result := view(instance)
 	previousMode := pb.Mode_MODE_UNSPECIFIED
@@ -45,12 +46,12 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 		if state.Phase == ready && (previous == nil || previous.Nodes[i].Phase == pending) {
 			dispatch := command(i, pb.CommandKind_COMMAND_KIND_TASK, pending)
 			dispatch.Id = state.ExecutionId
-			dispatch.Task = proto.Clone(w.nodes[i]).(*pb.Node)
+			dispatch.Task = proto.Clone(w.nodes[i].Node).(*pb.Node)
 			result.Commands = append(result.Commands, dispatch)
 		}
 	}
 
-	if result.Settled && previous != nil && !settled(previous) {
+	if result.Settled && previous != nil {
 		end := command(0, pb.CommandKind_COMMAND_KIND_END, previous.Nodes[0].Phase)
 		end.Id = stableID("end", instance.Id)
 		result.Commands = append(result.Commands, end)

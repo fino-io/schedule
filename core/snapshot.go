@@ -28,20 +28,18 @@ func (w *Workflow) Restore(instance *pb.Instance) (*pb.Transition, error) {
 	}
 
 	normalized := proto.Clone(instance).(*pb.Instance)
-	activated := make([]bool, len(w.nodes))
 	for i := len(w.nodes) - 1; i >= 0; i-- {
 		node, state := w.nodes[i], instance.Nodes[i]
+		active := activated(state.Phase)
 		bad := func(reason string) error {
 			return fmt.Errorf("%w: node %q: %s", ErrInvalidSnapshot, node.Id, reason)
 		}
 
 		if node.Kind == task {
-			executed := state.Phase != pending && state.Phase != skipped
-			if executed && state.ExecutionId != executionID(instance.Id, node.Id) ||
-				!executed && state.ExecutionId != "" {
+			if active && state.ExecutionId != executionID(instance.Id, node.Id) ||
+				!active && state.ExecutionId != "" {
 				return nil, bad("execution identity")
 			}
-			activated[i] = executed
 
 			if state.WinnerId != "" || state.Phase != skipped && state.CauseId != "" {
 				return nil, bad("leaf has combination metadata")
@@ -51,38 +49,29 @@ func (w *Workflow) Restore(instance *pb.Instance) (*pb.Transition, error) {
 				return nil, bad("result attached to a non-result state")
 			}
 		} else {
-			for _, child := range w.children[i] {
-				activated[i] = activated[i] || activated[child]
-			}
 			if state.ExecutionId != "" || state.Phase == ready {
 				return nil, bad("combination cannot be dispatched")
 			}
-			if state.Phase != pending && state.Phase != skipped && !activated[i] {
-				return nil, bad("combination has no activated descendant")
-			}
 
-			if node.Kind == seq {
-				prefixSucceeded := true
-				for _, child := range w.children[i] {
-					childState := instance.Nodes[child]
-					if activated[child] && !prefixSucceeded {
-						return nil, bad("later sequence item activated before its predecessor succeeded")
-					}
-					prefixSucceeded = prefixSucceeded && childState.Phase == succeeded
+			prefixSucceeded, hasActiveChild := true, false
+			for _, child := range node.children {
+				phase := instance.Nodes[child].Phase
+				childActive := activated(phase)
+				if !active && phase != state.Phase {
+					return nil, bad("inactive subtree has active descendants")
 				}
-			} else if state.Phase != pending && state.Phase != skipped {
-				for _, child := range w.children[i] {
-					if instance.Nodes[child].Phase == pending {
-						return nil, bad("parallel branch was not activated")
-					}
+				if node.Kind == seq && childActive && !prefixSucceeded {
+					return nil, bad("later sequence item activated before its predecessor succeeded")
 				}
+				if node.Kind != seq && active && phase == pending {
+					return nil, bad("parallel branch was not activated")
+				}
+
+				hasActiveChild = hasActiveChild || childActive
+				prefixSucceeded = prefixSucceeded && phase == succeeded
 			}
-			if state.Phase == pending || state.Phase == skipped {
-				for _, child := range w.children[i] {
-					if instance.Nodes[child].Phase != state.Phase {
-						return nil, bad("inactive subtree has active descendants")
-					}
-				}
+			if active && !hasActiveChild {
+				return nil, bad("combination has no activated descendant")
 			}
 
 			if state.Phase == stopped && (instance.Mode != modeStopped || state.CauseId != w.nodes[0].Id) {
@@ -107,7 +96,7 @@ func (w *Workflow) Restore(instance *pb.Instance) (*pb.Transition, error) {
 				}
 				if decision != "" {
 					child, exists := w.byID[decision]
-					if !exists || w.parent[child] != i {
+					if !exists || w.nodes[child].parent != i {
 						return nil, bad("decision does not reference a direct child")
 					}
 					preferred = child
@@ -127,8 +116,11 @@ func (w *Workflow) Restore(instance *pb.Instance) (*pb.Transition, error) {
 				instance.Nodes[cause].Phase == stopped || instance.Mode == modeStopped && cause == 0)
 
 			ancestor := false
-			for parent := w.parent[i]; parent >= 0; parent = w.parent[parent] {
-				ancestor = ancestor || parent == cause
+			for parent := node.parent; parent >= 0; parent = w.nodes[parent].parent {
+				if parent == cause {
+					ancestor = true
+					break
+				}
 			}
 
 			if !validCause || !ancestor || state.ErrorMessage != nil || state.ResultRef != "" {

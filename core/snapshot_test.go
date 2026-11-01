@@ -67,6 +67,9 @@ func TestSnapshotIntegrity(t *testing.T) {
 		"missing propagation": func(i *pb.Instance) {
 			i.Nodes[1].Phase = succeeded
 		},
+		"missing activation": func(i *pb.Instance) {
+			i.Nodes[1].Phase, i.Nodes[1].ExecutionId = pending, ""
+		},
 	}
 	for name, mutation := range mutations {
 		t.Run(name, func(t *testing.T) {

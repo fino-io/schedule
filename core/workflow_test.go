@@ -169,11 +169,28 @@ func TestWorkflowEventValidation(t *testing.T) {
 
 func TestWorkflowRevisionOverflow(t *testing.T) {
 	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
-	initial := start(t, w)
-	maxRevision := proto.Clone(initial.Instance).(*pb.Instance)
-	maxRevision.Revision = math.MaxUint64
-	if _, err := w.Advance(maxRevision, report(maxRevision, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)); !errors.Is(err, ErrConflict) {
-		t.Fatal("revision overflow accepted")
+	for _, kind := range []pb.EventKind{
+		pb.EventKind_EVENT_KIND_RESUME,
+		pb.EventKind_EVENT_KIND_PAUSE,
+		pb.EventKind_EVENT_KIND_STOP,
+	} {
+		t.Run(kind.String(), func(t *testing.T) {
+			current := start(t, w)
+			current = advance(t, w, current, control(current.Instance, kind))
+			current.Instance.Revision = math.MaxUint64
+			before := proto.Clone(current.Instance)
+
+			duplicate := advance(t, w, current, control(current.Instance, kind))
+			if len(duplicate.Commands) != 0 || !proto.Equal(before, duplicate.Instance) {
+				t.Fatal("duplicate control changed an exhausted revision")
+			}
+			if _, err := w.Advance(current.Instance, report(current.Instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)); !errors.Is(err, ErrConflict) {
+				t.Fatal("revision overflow accepted")
+			}
+			if !proto.Equal(before, current.Instance) {
+				t.Fatal("revision overflow modified its input")
+			}
+		})
 	}
 }
 
