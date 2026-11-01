@@ -68,8 +68,13 @@ func advance(t testing.TB, w *Workflow, current *pb.Transition, event *pb.Event)
 	if !proto.Equal(before, current.Instance) {
 		t.Fatal("advance modified its input")
 	}
-	if _, err := w.Restore(result.Instance); err != nil {
+	restored, err := w.Restore(result.Instance)
+	if err != nil {
 		t.Fatalf("advance produced invalid snapshot: %v\n%s", err, result.Instance)
+	}
+	if len(restored.Commands) != 0 || !proto.Equal(restored.Instance, result.Instance) ||
+		restored.ResultReady != result.ResultReady || restored.Settled != result.Settled {
+		t.Fatal("restore changed the snapshot, derived view or regenerated commands")
 	}
 
 	return result

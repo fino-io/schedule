@@ -130,7 +130,7 @@ func (w *Workflow) path(i int) []string {
 func stableID(parts ...string) string {
 	h := sha256.New()
 	for _, part := range parts {
-		fmt.Fprintf(h, "%d:%s", len(part), part)
+		_, _ = fmt.Fprintf(h, "%d:%s", len(part), part)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

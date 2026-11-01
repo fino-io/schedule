@@ -114,4 +114,11 @@ flowchart LR
 
 实现改动运行 `go test ./...`；涉及共享定义或快照隔离时补充 `go test -race ./...`。静态检查用 `go vet ./...`，API 模块单独执行 `cd go && go test ./...`。
 
+`FuzzWorkflow` 用最多 4 层、40 个节点的组合树检查恢复一致性、输入隔离、重复事件幂等、决策锁定和命令唯一性。普通测试运行种子样本，持续 fuzz 和 1,000 任务基准按需执行：
+
+```bash
+go test ./core -run '^$' -fuzz '^FuzzWorkflow$' -fuzztime=60s -parallel=2
+go test ./core -run '^$' -bench 'Benchmark(Compile|Advance)$' -benchmem -cpu=1 -count=5
+```
+
 契约变化先改 `proto/`，再运行 `fino doctor --output=. --targets=api` 和 `fino build --output=. --targets=api`，检查受影响的生成产物；仅修改核心实现时无需重新生成。
