@@ -9,15 +9,20 @@ import (
 
 func ExampleWorkflow() {
 	workflow, err := schedule.Compile(&pb.Definition{
-		Root: schedule.Seq("root", schedule.Any("source", schedule.Task("primary"), schedule.Task("backup")), schedule.Task("publish")),
+		Root: schedule.Seq("root",
+			schedule.Any("source", schedule.Task("primary"), schedule.Task("backup")),
+			schedule.Task("publish"),
+		),
 	})
 	if err != nil {
 		panic(err)
 	}
+
 	current, err := workflow.Start("run-42")
 	if err != nil {
 		panic(err)
 	}
+
 	for i, node := range []string{"primary", "publish", "backup"} {
 		var executionID string
 		for _, state := range current.Instance.Nodes {

@@ -13,24 +13,60 @@ func TestSnapshotIntegrity(t *testing.T) {
 	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
 	initial := start(t, w)
 	mutations := map[string]func(*pb.Instance){
-		"identity":            func(i *pb.Instance) { i.Id = "" },
-		"definition":          func(i *pb.Instance) { i.DefinitionHash = "other" },
-		"revision":            func(i *pb.Instance) { i.Revision = 0 },
-		"mode":                func(i *pb.Instance) { i.Mode = pb.Mode_MODE_UNSPECIFIED },
-		"missing node":        func(i *pb.Instance) { i.Nodes = i.Nodes[:2] },
-		"nil node":            func(i *pb.Instance) { i.Nodes[1] = nil },
-		"reordered":           func(i *pb.Instance) { i.Nodes[1], i.Nodes[2] = i.Nodes[2], i.Nodes[1] },
-		"unknown phase":       func(i *pb.Instance) { i.Nodes[1].Phase = 99 },
-		"undispatched root":   func(i *pb.Instance) { i.Nodes[0].Phase = pending },
-		"group dispatch":      func(i *pb.Instance) { i.Nodes[0].ExecutionId = "invalid" },
-		"leaf binding":        func(i *pb.Instance) { i.Nodes[1].ExecutionId = "wrong" },
-		"premature error":     func(i *pb.Instance) { i.Nodes[1].ErrorMessage = proto.String("error") },
-		"leaf winner":         func(i *pb.Instance) { i.Nodes[1].WinnerId = "a" },
-		"forged success":      func(i *pb.Instance) { i.Nodes[0].Phase = succeeded },
-		"forged stop":         func(i *pb.Instance) { i.Nodes[0].Phase, i.Nodes[0].CauseId = stopped, "root" },
-		"illegal skip":        func(i *pb.Instance) { i.Nodes[2].Phase, i.Nodes[2].CauseId = skipped, "a" },
-		"bypass dependency":   func(i *pb.Instance) { i.Nodes[2].Phase, i.Nodes[2].ExecutionId = ready, executionID(i.Id, "b") },
-		"missing propagation": func(i *pb.Instance) { i.Nodes[1].Phase = succeeded },
+		"identity": func(i *pb.Instance) {
+			i.Id = ""
+		},
+		"definition": func(i *pb.Instance) {
+			i.DefinitionHash = "other"
+		},
+		"revision": func(i *pb.Instance) {
+			i.Revision = 0
+		},
+		"mode": func(i *pb.Instance) {
+			i.Mode = pb.Mode_MODE_UNSPECIFIED
+		},
+		"missing node": func(i *pb.Instance) {
+			i.Nodes = i.Nodes[:2]
+		},
+		"nil node": func(i *pb.Instance) {
+			i.Nodes[1] = nil
+		},
+		"reordered": func(i *pb.Instance) {
+			i.Nodes[1], i.Nodes[2] = i.Nodes[2], i.Nodes[1]
+		},
+		"unknown phase": func(i *pb.Instance) {
+			i.Nodes[1].Phase = 99
+		},
+		"undispatched root": func(i *pb.Instance) {
+			i.Nodes[0].Phase = pending
+		},
+		"group dispatch": func(i *pb.Instance) {
+			i.Nodes[0].ExecutionId = "invalid"
+		},
+		"leaf binding": func(i *pb.Instance) {
+			i.Nodes[1].ExecutionId = "wrong"
+		},
+		"premature error": func(i *pb.Instance) {
+			i.Nodes[1].ErrorMessage = proto.String("error")
+		},
+		"leaf winner": func(i *pb.Instance) {
+			i.Nodes[1].WinnerId = "a"
+		},
+		"forged success": func(i *pb.Instance) {
+			i.Nodes[0].Phase = succeeded
+		},
+		"forged stop": func(i *pb.Instance) {
+			i.Nodes[0].Phase, i.Nodes[0].CauseId = stopped, "root"
+		},
+		"illegal skip": func(i *pb.Instance) {
+			i.Nodes[2].Phase, i.Nodes[2].CauseId = skipped, "a"
+		},
+		"bypass dependency": func(i *pb.Instance) {
+			i.Nodes[2].Phase, i.Nodes[2].ExecutionId = ready, executionID(i.Id, "b")
+		},
+		"missing propagation": func(i *pb.Instance) {
+			i.Nodes[1].Phase = succeeded
+		},
 	}
 	for name, mutation := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -44,6 +80,7 @@ func TestSnapshotIntegrity(t *testing.T) {
 	if _, err := w.Restore(nil); !errors.Is(err, ErrInvalidSnapshot) {
 		t.Fatal(err)
 	}
+
 	other := mustCompile(t, Seq("root", Task("b"), Task("a")))
 	if _, err := other.Restore(initial.Instance); !errors.Is(err, ErrInvalidSnapshot) {
 		t.Fatal("different definition accepted")
@@ -79,6 +116,7 @@ func TestSnapshotSerializationAndReplay(t *testing.T) {
 		}
 		current = restored
 	}
+
 	replayed := start(t, w)
 	for _, event := range events {
 		replayed = advance(t, w, replayed, event)

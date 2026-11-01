@@ -20,11 +20,13 @@ func (j *journal) commit(revision uint64, event *pb.Event, next *pb.Transition) 
 	if j.instance.Revision != revision {
 		return ErrConflict
 	}
+
 	j.instance = proto.Clone(next.Instance).(*pb.Instance)
 	j.receipts[event.Id] = proto.Clone(event).(*pb.Event)
 	for _, command := range next.Commands {
 		j.outbox = append(j.outbox, proto.Clone(command).(*pb.Command))
 	}
+
 	return nil
 }
 
@@ -35,6 +37,7 @@ func (j *journal) accept(w *Workflow, event *pb.Event) error {
 		}
 		return nil
 	}
+
 	next, err := w.Advance(j.instance, event)
 	if err != nil {
 		return err
@@ -54,10 +57,12 @@ func (q *idempotentQueue) OnTask(_ context.Context, command *pb.Command) error {
 	}
 	return nil
 }
+
 func (q *idempotentQueue) OnState(_ context.Context, command *pb.Command) error {
 	q.seen[command.Id] = true
 	return nil
 }
+
 func (q *idempotentQueue) OnEnd(_ context.Context, command *pb.Command) error {
 	q.seen[command.Id] = true
 	return nil
@@ -66,8 +71,16 @@ func (q *idempotentQueue) OnEnd(_ context.Context, command *pb.Command) error {
 func TestCrashRecoveryAndDeliveryProtocol(t *testing.T) {
 	w := mustCompile(t, Seq("root", Task("a"), Task("b")))
 	initial := start(t, w)
-	store := &journal{instance: initial.Instance, receipts: make(map[string]*pb.Event), outbox: initial.Commands}
-	queue := &idempotentQueue{seen: make(map[string]bool), jobs: make(map[string]*pb.Node)}
+	store := &journal{
+		instance: initial.Instance,
+		receipts: make(map[string]*pb.Event),
+		outbox:   initial.Commands,
+	}
+	queue := &idempotentQueue{
+		seen: make(map[string]bool),
+		jobs: make(map[string]*pb.Node),
+	}
+
 	// 保存快照后、入队前崩溃：恢复不制造命令，直接重发已保存的 outbox。
 	data, err := proto.Marshal(store.instance)
 	if err != nil {
@@ -90,14 +103,17 @@ func TestCrashRecoveryAndDeliveryProtocol(t *testing.T) {
 	if len(queue.jobs) != 1 {
 		t.Fatal("lost or duplicated initial execution")
 	}
+
 	event := report(store.instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)
 	if err := store.accept(w, event); err != nil {
 		t.Fatal(err)
 	}
+
 	count, revision := len(store.outbox), store.instance.Revision
 	if err := store.accept(w, event); err != nil || len(store.outbox) != count || store.instance.Revision != revision {
 		t.Fatal("event redelivery created effects")
 	}
+
 	conflict := proto.Clone(event).(*pb.Event)
 	conflict.Kind = pb.EventKind_EVENT_KIND_FAILED
 	if err := store.accept(w, conflict); !errors.Is(err, ErrConflict) {
@@ -106,6 +122,7 @@ func TestCrashRecoveryAndDeliveryProtocol(t *testing.T) {
 	if err := Dispatch(context.Background(), queue, store.outbox); err != nil || len(queue.jobs) != 2 {
 		t.Fatal("successor was lost or duplicated")
 	}
+
 	pause := control(store.instance, pb.EventKind_EVENT_KIND_PAUSE)
 	if err := store.accept(w, pause); err != nil {
 		t.Fatal(err)
@@ -121,7 +138,11 @@ func TestCrashRecoveryAndDeliveryProtocol(t *testing.T) {
 func TestConcurrentResultsUseCompareAndSwap(t *testing.T) {
 	w := mustCompile(t, Any("root", Task("a"), Task("b")))
 	initial := start(t, w)
-	store := &journal{instance: initial.Instance, receipts: make(map[string]*pb.Event)}
+	store := &journal{
+		instance: initial.Instance,
+		receipts: make(map[string]*pb.Event),
+	}
+
 	a := report(initial.Instance, "a", pb.EventKind_EVENT_KIND_SUCCEEDED)
 	b := report(initial.Instance, "b", pb.EventKind_EVENT_KIND_SUCCEEDED)
 	first, err := w.Advance(initial.Instance, a)
@@ -132,6 +153,7 @@ func TestConcurrentResultsUseCompareAndSwap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := store.commit(initial.Instance.Revision, a, first); err != nil {
 		t.Fatal(err)
 	}

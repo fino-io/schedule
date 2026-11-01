@@ -13,6 +13,7 @@ func (w *Workflow) Start(instanceID string) (*pb.Transition, error) {
 	if instanceID == "" || !validText(instanceID) {
 		return nil, fmt.Errorf("%w: instance ID is required", ErrInvalidEvent)
 	}
+
 	instance := &pb.Instance{
 		Id:             instanceID,
 		DefinitionHash: w.hash,
@@ -21,9 +22,14 @@ func (w *Workflow) Start(instanceID string) (*pb.Transition, error) {
 		Nodes:          make([]*pb.NodeState, len(w.nodes)),
 	}
 	for i, node := range w.nodes {
-		instance.Nodes[i] = &pb.NodeState{NodeId: node.Id, Phase: pending}
+		instance.Nodes[i] = &pb.NodeState{
+			NodeId: node.Id,
+			Phase:  pending,
+		}
 	}
+
 	w.reconcile(instance)
+
 	return w.transition(nil, instance), nil
 }
 
@@ -40,9 +46,11 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 	if err := w.validate(instance); err != nil {
 		return nil, err
 	}
-	if event == nil || event.Id == "" || event.InstanceId != instance.Id || !validText(event.Id, event.ResultRef, event.GetErrorMessage()) {
+	if event == nil || event.Id == "" || event.InstanceId != instance.Id ||
+		!validText(event.Id, event.ResultRef, event.GetErrorMessage()) {
 		return nil, fmt.Errorf("%w: event ID or instance binding", ErrInvalidEvent)
 	}
+
 	next := proto.Clone(instance).(*pb.Instance)
 	if event.Kind >= pb.EventKind_EVENT_KIND_PAUSE && event.Kind <= pb.EventKind_EVENT_KIND_STOP {
 		if event.NodeId != "" || event.ExecutionId != "" || event.ErrorMessage != nil || event.ResultRef != "" {
@@ -54,6 +62,7 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 		if next.Mode == modeStopped && event.Kind != pb.EventKind_EVENT_KIND_STOP {
 			return nil, fmt.Errorf("%w: stopped instance cannot pause or resume", ErrConflict)
 		}
+
 		switch event.Kind {
 		case pb.EventKind_EVENT_KIND_PAUSE:
 			next.Mode = modePaused
@@ -64,13 +73,15 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 		}
 	} else {
 		i, exists := w.byID[event.NodeId]
-		if !exists || w.nodes[i].Kind != task || event.ExecutionId == "" || event.ExecutionId != next.Nodes[i].ExecutionId {
+		if !exists || w.nodes[i].Kind != task ||
+			event.ExecutionId == "" || event.ExecutionId != next.Nodes[i].ExecutionId {
 			return nil, fmt.Errorf("%w: node or execution binding", ErrInvalidEvent)
 		}
 		state := next.Nodes[i]
 		if state.Phase == pending || state.Phase == skipped {
 			return nil, fmt.Errorf("%w: task %q was not dispatched", ErrInvalidEvent, event.NodeId)
 		}
+
 		var target pb.Phase
 		switch event.Kind {
 		case pb.EventKind_EVENT_KIND_STARTED:
@@ -93,6 +104,7 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 		default:
 			return nil, fmt.Errorf("%w: unknown event kind", ErrInvalidEvent)
 		}
+
 		if terminal(state.Phase) {
 			candidate := proto.Clone(state).(*pb.NodeState)
 			candidate.Phase, candidate.ErrorMessage, candidate.ResultRef = target, event.ErrorMessage, event.ResultRef
@@ -101,14 +113,17 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 			}
 			return nil, fmt.Errorf("%w: task %q already has a different result", ErrConflict, event.NodeId)
 		}
+
 		state.Phase = target
 		state.ErrorMessage = cloneString(event.ErrorMessage)
 		state.ResultRef = event.ResultRef
+
 		// 在激活任何后继之前，先向上传播结果，使祖先失败能及时阻止分派。
 		for child, parent := i, w.parent[i]; parent >= 0; child, parent = parent, w.parent[parent] {
 			w.resolve(next, parent, child)
 		}
 	}
+
 	w.reconcile(next)
 	if proto.Equal(instance, next) {
 		return w.view(next), nil
@@ -116,7 +131,9 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 	if instance.Revision == math.MaxUint64 {
 		return nil, fmt.Errorf("%w: revision exhausted", ErrConflict)
 	}
+
 	next.Revision++
+
 	return w.transition(instance, next), nil
 }
 
@@ -150,6 +167,7 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 	if previous != nil {
 		previousMode = previous.Mode
 	}
+
 	command := func(i int, kind pb.CommandKind, previousPhase pb.Phase) *pb.Command {
 		return &pb.Command{
 			InstanceId:     instance.Id,
@@ -163,6 +181,7 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 			Path:           w.path(i),
 		}
 	}
+
 	for i, state := range instance.Nodes {
 		before := pending
 		if previous != nil {
@@ -172,12 +191,14 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 		if previous != nil {
 			changed = !proto.Equal(state, previous.Nodes[i])
 		}
+
 		if changed || (i == 0 && previousMode != instance.Mode) {
 			notification := command(i, pb.CommandKind_COMMAND_KIND_STATE, before)
 			notification.Id = stableID("state", instance.Id, state.NodeId, strconv.FormatUint(instance.Revision, 10))
 			result.Commands = append(result.Commands, notification)
 		}
 	}
+
 	for i, state := range instance.Nodes {
 		if state.Phase == ready && (previous == nil || previous.Nodes[i].Phase == pending) {
 			dispatch := command(i, pb.CommandKind_COMMAND_KIND_TASK, pending)
@@ -186,10 +207,12 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 			result.Commands = append(result.Commands, dispatch)
 		}
 	}
+
 	if result.Settled && previous != nil && !settled(previous) {
 		end := command(0, pb.CommandKind_COMMAND_KIND_END, previous.Nodes[0].Phase)
 		end.Id = stableID("end", instance.Id)
 		result.Commands = append(result.Commands, end)
 	}
+
 	return result
 }

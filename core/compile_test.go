@@ -15,10 +15,12 @@ func TestCompileDefinition(t *testing.T) {
 	branch := Any("branch", Task("a"), Seq("nested", Task("b"), Task("c")))
 	root := Seq("root", branch)
 	w := mustCompile(t, root)
+
 	path, err := w.Path("c")
 	if err != nil || !reflect.DeepEqual(path, []string{"root", "branch", "nested", "c"}) {
 		t.Fatalf("path=%v err=%v", path, err)
 	}
+
 	branch.Id = "mutated"
 	definition := w.Definition()
 	definition.Root.Id = "mutated"
@@ -30,6 +32,7 @@ func TestCompileDefinition(t *testing.T) {
 	if _, err := w.Node("a"); err != nil || w.Definition().Root.Id != "root" {
 		t.Fatal("compiled definition exposed mutable data")
 	}
+
 	if _, err := w.Node("missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
@@ -46,13 +49,28 @@ func TestCompileRejectsInvalidTrees(t *testing.T) {
 	for i := range maxDepth {
 		deep = Seq(fmt.Sprint(i), deep)
 	}
+
 	cases := map[string]*pb.Node{
-		"nil": nil, "empty ID": Task(""), "missing kind": {Id: "root"},
-		"unknown kind": {Id: "root", Kind: 99}, "nil child": Seq("root", nil),
-		"empty Seq": Seq("root"), "empty All": All("root"), "empty Any": Any("root"),
-		"leaf children": {Id: "root", Kind: task, Children: []*pb.Node{Task("a")}},
-		"duplicate":     All("root", Task("a"), Task("a")),
-		"shared":        All("root", shared, shared), "cycle": cycle, "depth": deep,
+		"nil":          nil,
+		"empty ID":     Task(""),
+		"missing kind": {Id: "root"},
+		"unknown kind": {
+			Id:   "root",
+			Kind: 99,
+		},
+		"nil child": Seq("root", nil),
+		"empty Seq": Seq("root"),
+		"empty All": All("root"),
+		"empty Any": Any("root"),
+		"leaf children": {
+			Id:       "root",
+			Kind:     task,
+			Children: []*pb.Node{Task("a")},
+		},
+		"duplicate": All("root", Task("a"), Task("a")),
+		"shared":    All("root", shared, shared),
+		"cycle":     cycle,
+		"depth":     deep,
 	}
 	for name, root := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -75,6 +93,7 @@ func TestCompileLimits(t *testing.T) {
 	if _, err := Compile(&pb.Definition{Root: root}); err != nil {
 		t.Fatal(err)
 	}
+
 	root.Children = append(root.Children, Task("extra"))
 	if _, err := Compile(&pb.Definition{Root: root}); !errors.Is(err, ErrInvalidDefinition) {
 		t.Fatal("node limit not enforced")
@@ -88,11 +107,13 @@ func TestCompileConcurrentUse(t *testing.T) {
 		group.Add(1)
 		go func(id int) {
 			defer group.Done()
+
 			current, err := w.Start(fmt.Sprint(id))
 			if err != nil {
 				t.Error(err)
 				return
 			}
+
 			for _, node := range []string{"a", "b"} {
 				before := proto.Clone(current.Instance)
 				next, err := w.Advance(current.Instance, report(current.Instance, node, pb.EventKind_EVENT_KIND_SUCCEEDED))
@@ -107,6 +128,7 @@ func TestCompileConcurrentUse(t *testing.T) {
 			}
 		}(i)
 	}
+
 	group.Wait()
 }
 
@@ -116,6 +138,7 @@ func BenchmarkCompile(b *testing.B) {
 		items[i] = Task(fmt.Sprint(i))
 	}
 	definition := &pb.Definition{Root: All("root", items...)}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

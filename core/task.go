@@ -36,19 +36,34 @@ const (
 )
 
 func Task(id string) *pb.Node {
-	return &pb.Node{Id: id, Kind: task}
+	return &pb.Node{
+		Id:   id,
+		Kind: task,
+	}
 }
 
 func Seq(id string, children ...*pb.Node) *pb.Node {
-	return &pb.Node{Id: id, Kind: seq, Children: append([]*pb.Node(nil), children...)}
+	return &pb.Node{
+		Id:       id,
+		Kind:     seq,
+		Children: append([]*pb.Node(nil), children...),
+	}
 }
 
 func All(id string, children ...*pb.Node) *pb.Node {
-	return &pb.Node{Id: id, Kind: all, Children: append([]*pb.Node(nil), children...)}
+	return &pb.Node{
+		Id:       id,
+		Kind:     all,
+		Children: append([]*pb.Node(nil), children...),
+	}
 }
 
 func Any(id string, children ...*pb.Node) *pb.Node {
-	return &pb.Node{Id: id, Kind: any, Children: append([]*pb.Node(nil), children...)}
+	return &pb.Node{
+		Id:       id,
+		Kind:     any,
+		Children: append([]*pb.Node(nil), children...),
+	}
 }
 
 // Append 只检查装配参数；整树约束在 Compile 一次完成，允许先挂空组合再填充。
@@ -61,6 +76,7 @@ func Append(parent *pb.Node, children ...*pb.Node) error {
 			return fmt.Errorf("%w: nil child or direct self-reference", ErrInvalidDefinition)
 		}
 	}
+
 	parent.Children = append(parent.Children, children...)
 	return nil
 }

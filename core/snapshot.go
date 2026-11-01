@@ -8,36 +8,44 @@ import (
 )
 
 func (w *Workflow) validate(instance *pb.Instance) error {
-	if instance == nil || instance.Id == "" || !validText(instance.Id) || instance.DefinitionHash != w.hash || instance.Revision == 0 {
+	if instance == nil || instance.Id == "" || !validText(instance.Id) ||
+		instance.DefinitionHash != w.hash || instance.Revision == 0 {
 		return fmt.Errorf("%w: instance identity, definition or revision", ErrInvalidSnapshot)
 	}
 	if instance.Mode < modeRunning || instance.Mode > modeStopped || len(instance.Nodes) != len(w.nodes) {
 		return fmt.Errorf("%w: mode or node count", ErrInvalidSnapshot)
 	}
+
 	for i, state := range instance.Nodes {
-		if state == nil || state.NodeId != w.nodes[i].Id || state.Phase < pending || state.Phase > skipped || !validText(state.ResultRef, state.GetErrorMessage()) {
+		if state == nil || state.NodeId != w.nodes[i].Id ||
+			state.Phase < pending || state.Phase > skipped || !validText(state.ResultRef, state.GetErrorMessage()) {
 			return fmt.Errorf("%w: node order, identity or phase at %d", ErrInvalidSnapshot, i)
 		}
 	}
 	if instance.Nodes[0].Phase == pending || instance.Nodes[0].Phase == skipped {
 		return fmt.Errorf("%w: root was never activated", ErrInvalidSnapshot)
 	}
+
 	activated := make([]bool, len(w.nodes))
 	for i := len(w.nodes) - 1; i >= 0; i-- {
 		node, state := w.nodes[i], instance.Nodes[i]
 		bad := func(reason string) error {
 			return fmt.Errorf("%w: node %q: %s", ErrInvalidSnapshot, node.Id, reason)
 		}
+
 		if node.Kind == task {
 			executed := state.Phase != pending && state.Phase != skipped
-			if executed && state.ExecutionId != executionID(instance.Id, node.Id) || !executed && state.ExecutionId != "" {
+			if executed && state.ExecutionId != executionID(instance.Id, node.Id) ||
+				!executed && state.ExecutionId != "" {
 				return bad("execution identity")
 			}
 			activated[i] = executed
+
 			if state.WinnerId != "" || state.Phase != skipped && state.CauseId != "" {
 				return bad("leaf has combination metadata")
 			}
-			if !terminal(state.Phase) && (state.ErrorMessage != nil || state.ResultRef != "") || state.Phase == succeeded && state.ErrorMessage != nil {
+			if !terminal(state.Phase) && (state.ErrorMessage != nil || state.ResultRef != "") ||
+				state.Phase == succeeded && state.ErrorMessage != nil {
 				return bad("result attached to a non-result state")
 			}
 		} else {
@@ -50,6 +58,7 @@ func (w *Workflow) validate(instance *pb.Instance) error {
 			if state.Phase != pending && state.Phase != skipped && !activated[i] {
 				return bad("combination has no activated descendant")
 			}
+
 			if node.Kind == seq {
 				prefixSucceeded := true
 				for _, child := range w.children[i] {
@@ -73,10 +82,12 @@ func (w *Workflow) validate(instance *pb.Instance) error {
 					}
 				}
 			}
+
 			if state.Phase == succeeded {
 				if node.Kind == any {
 					winner, exists := w.byID[state.WinnerId]
-					if !exists || w.parent[winner] != i || instance.Nodes[winner].Phase != succeeded || state.ResultRef != instance.Nodes[winner].ResultRef {
+					if !exists || w.parent[winner] != i ||
+						instance.Nodes[winner].Phase != succeeded || state.ResultRef != instance.Nodes[winner].ResultRef {
 						return bad("invalid Any winner")
 					}
 				} else {
@@ -94,12 +105,14 @@ func (w *Workflow) validate(instance *pb.Instance) error {
 							return bad("failed Any still has a possible or actual success")
 						}
 					}
+
 					if state.ErrorMessage == nil || *state.ErrorMessage != "no successful branch" || state.CauseId != "" {
 						return bad("invalid Any failure")
 					}
 				} else {
 					cause, exists := w.byID[state.CauseId]
-					if !exists || w.parent[cause] != i || !terminal(instance.Nodes[cause].Phase) || instance.Nodes[cause].Phase == succeeded {
+					if !exists || w.parent[cause] != i ||
+						!terminal(instance.Nodes[cause].Phase) || instance.Nodes[cause].Phase == succeeded {
 						return bad("invalid failure source")
 					}
 					if node.Kind == seq {
@@ -114,6 +127,7 @@ func (w *Workflow) validate(instance *pb.Instance) error {
 					}
 				}
 			}
+
 			if state.WinnerId != "" && !(node.Kind == any && state.Phase == succeeded) {
 				return bad("unexpected winner")
 			}
@@ -130,23 +144,29 @@ func (w *Workflow) validate(instance *pb.Instance) error {
 				return bad("combination stopped without instance control")
 			}
 		}
+
 		if state.Phase == skipped {
 			cause, exists := w.byID[state.CauseId]
-			validCause := exists && (instance.Nodes[cause].Phase == failed || instance.Nodes[cause].Phase == stopped || instance.Mode == modeStopped && cause == 0)
+			validCause := exists && (instance.Nodes[cause].Phase == failed ||
+				instance.Nodes[cause].Phase == stopped || instance.Mode == modeStopped && cause == 0)
+
 			ancestor := false
 			for parent := w.parent[i]; parent >= 0; parent = w.parent[parent] {
 				ancestor = ancestor || parent == cause
 			}
+
 			if !validCause || !ancestor || state.ErrorMessage != nil || state.ResultRef != "" {
 				return bad("invalid skip source")
 			}
 		}
 	}
+
 	// 通过同一归约规则检查是否遗漏汇总、激活或跳过，不维护另一套推进行为。
 	normalized := proto.Clone(instance).(*pb.Instance)
 	w.reconcile(normalized)
 	if !proto.Equal(instance, normalized) {
 		return fmt.Errorf("%w: snapshot has unapplied transitions", ErrInvalidSnapshot)
 	}
+
 	return nil
 }

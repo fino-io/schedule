@@ -13,6 +13,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		if instance.Mode == modeStopped {
 			blocker = w.nodes[0].Id
 		}
+
 		if state.Phase == pending {
 			if blocker != "" {
 				state.Phase, state.CauseId = skipped, blocker
@@ -24,6 +25,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 			if !allowed {
 				return
 			}
+
 			if node.Kind == task {
 				state.Phase = ready
 				state.ExecutionId = executionID(instance.Id, node.Id)
@@ -34,12 +36,14 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		if node.Kind == task || state.Phase == skipped {
 			return
 		}
+
 		if instance.Mode == modeStopped && !terminal(state.Phase) {
 			state.Phase, state.CauseId = stopped, w.nodes[0].Id
 		}
 		if blocker == "" && (state.Phase == failed || state.Phase == stopped) {
 			blocker = node.Id
 		}
+
 		prefixSucceeded := true
 		for _, child := range w.children[i] {
 			phase := instance.Nodes[child].Phase
@@ -47,6 +51,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 			prefixSucceeded = prefixSucceeded && phase == succeeded
 			visit(child, allowed && canActivate, blocker)
 		}
+
 		w.resolve(instance, i, -1)
 	}
 	visit(0, instance.Mode == modeRunning, "")
@@ -58,10 +63,12 @@ func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 	if state.Phase != running || node.Kind == task {
 		return
 	}
+
 	children := w.children[i]
 	fail := func(child int) {
 		state.Phase, state.CauseId = failed, w.nodes[child].Id
 	}
+
 	switch node.Kind {
 	case seq:
 		for _, child := range children {
@@ -74,6 +81,7 @@ func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 			}
 		}
 		state.Phase = succeeded
+
 	case all:
 		if preferred >= 0 {
 			phase := instance.Nodes[preferred].Phase
@@ -82,6 +90,7 @@ func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 				return
 			}
 		}
+
 		complete := true
 		for _, child := range children {
 			phase := instance.Nodes[child].Phase
@@ -94,6 +103,7 @@ func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 		if complete {
 			state.Phase = succeeded
 		}
+
 	case any:
 		winner := -1
 		complete := true
@@ -104,6 +114,7 @@ func (w *Workflow) resolve(instance *pb.Instance, i, preferred int) {
 			}
 			complete = complete && terminal(phase)
 		}
+
 		if winner >= 0 {
 			state.Phase, state.WinnerId = succeeded, w.nodes[winner].Id
 			state.ResultRef = instance.Nodes[winner].ResultRef

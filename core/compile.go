@@ -42,12 +42,14 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 		if node.Kind < task || node.Kind > any || (node.Kind == task) != (len(node.Children) == 0) {
 			return fmt.Errorf("%w: invalid kind or children of %q", ErrInvalidDefinition, node.Id)
 		}
+
 		ids[node.Id] = true
 		for _, child := range node.Children {
 			if err := validate(child, depth+1); err != nil {
 				return err
 			}
 		}
+
 		return nil
 	}
 	if err := validate(definition.GetRoot(), 1); err != nil {
@@ -58,12 +60,14 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 		definition: proto.Clone(definition).(*pb.Definition),
 		byID:       make(map[string]int, len(ids)),
 	}
+
 	data, err := (proto.MarshalOptions{Deterministic: true}).Marshal(w.definition)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidDefinition, err)
 	}
 	digest := sha256.Sum256(data)
 	w.hash = hex.EncodeToString(digest[:])
+
 	var index func(*pb.Node, int) int
 	index = func(node *pb.Node, parent int) int {
 		i := len(w.nodes)
@@ -71,13 +75,16 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 		w.parent = append(w.parent, parent)
 		w.children = append(w.children, nil)
 		w.byID[node.Id] = i
+
 		for _, child := range node.Children {
 			childIndex := index(child, i)
 			w.children[i] = append(w.children[i], childIndex)
 		}
+
 		return i
 	}
 	index(w.definition.Root, -1)
+
 	return w, nil
 }
 
@@ -107,9 +114,11 @@ func (w *Workflow) path(i int) []string {
 		path = append(path, w.nodes[i].Id)
 		i = w.parent[i]
 	}
+
 	for left, right := 0, len(path)-1; left < right; left, right = left+1, right-1 {
 		path[left], path[right] = path[right], path[left]
 	}
+
 	return path
 }
 

@@ -19,6 +19,7 @@ func TestAppendRejectsInvalidChildren(t *testing.T) {
 	if err := Append(Task("leaf"), Task("child")); err == nil {
 		t.Fatal("leaf accepted children")
 	}
+
 	parent := Seq("parent", Task("existing"))
 	if err := Append(parent, Task("new"), nil); err == nil || len(parent.Children) != 1 {
 		t.Fatal("invalid append modified its parent")

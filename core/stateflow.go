@@ -17,14 +17,17 @@ func CompileStateflow(definition *pb.StateflowDefinition) (*Stateflow, error) {
 	if definition == nil || definition.Init == "" || !validText(definition.Init) {
 		return nil, fmt.Errorf("%w: initial state is required", ErrInvalidDefinition)
 	}
+
 	flow := &Stateflow{
 		definition: proto.Clone(definition).(*pb.StateflowDefinition),
 		steps:      map[string]map[string]*pb.StateflowStep{definition.Init: {}},
 	}
+
 	for _, step := range flow.definition.Steps {
 		if step == nil || step.From == "" || step.To == "" || !validText(step.From, step.To, step.Event) {
 			return nil, fmt.Errorf("%w: transition endpoints are required", ErrInvalidDefinition)
 		}
+
 		for _, state := range []string{step.From, step.To} {
 			if flow.steps[state] == nil {
 				flow.steps[state] = make(map[string]*pb.StateflowStep)
@@ -33,8 +36,10 @@ func CompileStateflow(definition *pb.StateflowDefinition) (*Stateflow, error) {
 		if flow.steps[step.From][step.To] != nil {
 			return nil, fmt.Errorf("%w: duplicate transition %q -> %q", ErrInvalidDefinition, step.From, step.To)
 		}
+
 		flow.steps[step.From][step.To] = step
 	}
+
 	return flow, nil
 }
 
@@ -58,11 +63,14 @@ func (f *Stateflow) Advance(instance *pb.StateflowInstance, target string) (*pb.
 	if err != nil {
 		return nil, nil, err
 	}
+
 	step := f.steps[instance.State][target]
 	if step == nil {
 		return nil, nil, fmt.Errorf("%w: cannot transition from %q to %q", ErrInvalidEvent, instance.State, target)
 	}
+
 	next.State = target
+
 	return next, proto.Clone(step).(*pb.StateflowStep), nil
 }
 
