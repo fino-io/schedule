@@ -91,7 +91,10 @@ func TestDispatchRejectsCorruptedCommands(t *testing.T) {
 			c.Kind = 99
 		},
 		func(c *pb.Command) {
-			c.Path = nil
+			c.Mode = pb.Mode_MODE_UNSPECIFIED
+		},
+		func(c *pb.Command) {
+			c.State.ExecutionId = "wrong"
 		},
 		func(c *pb.Command) {
 			c.State.Phase = succeeded

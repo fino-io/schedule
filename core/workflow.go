@@ -71,15 +71,12 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 		next.Mode = targetMode
 	} else {
 		i, exists := w.byID[event.NodeId]
+		// Restore 已保证未分派任务的执行标识为空，非空绑定同时检查分派资格。
 		if !exists || w.nodes[i].Kind != task ||
 			event.ExecutionId == "" || event.ExecutionId != next.Nodes[i].ExecutionId {
 			return nil, fmt.Errorf("%w: node or execution binding", ErrInvalidEvent)
 		}
 		state := next.Nodes[i]
-		if state.Phase == pending || state.Phase == skipped {
-			return nil, fmt.Errorf("%w: task %q was not dispatched", ErrInvalidEvent, event.NodeId)
-		}
-
 		var target pb.Phase
 		switch event.Kind {
 		case pb.EventKind_EVENT_KIND_STARTED:

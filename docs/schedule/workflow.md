@@ -45,7 +45,7 @@ STARTED/SUCCEEDED/FAILED/STOPPED 是叶子报告，绑定实例、节点和逻�
 ## `schedule.Command`
 
 自包含、可持久化的执行或通知意图。接入方按 id 幂等投递。
- STATE 包含节点状态变化或根的控制模式变化；END 只在首次全部收尾时产生。
+ STATE 通知节点或根控制模式变化后的当前状态；END 只在首次全部收尾时产生。
 
 | 字段 | 类型 | 格式 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|---|
@@ -55,10 +55,7 @@ STARTED/SUCCEEDED/FAILED/STOPPED 是叶子报告，绑定实例、节点和逻�
 | `revision` | `integer` | `Uint64` | 否 |  |  |
 | `kind` | [`schedule.CommandKind`](workflow.md#schedule-commandkind) |  | 否 |  |  |
 | `state` | `schedule.NodeState` |  | 否 |  |  |
-| `previousPhase` | [`schedule.Phase`](workflow.md#schedule-phase) |  | 否 |  |  |
 | `mode` | [`schedule.Mode`](workflow.md#schedule-mode) |  | 否 |  |  |
-| `previousMode` | [`schedule.Mode`](workflow.md#schedule-mode) |  | 否 |  |  |
-| `path` | `Array<string>` |  | 否 |  |  |
 | `task` | `schedule.Node` |  | 否 |  | 只有 TASK 命令包含叶子定义，通知无需重新装载整棵树。 |
 
 

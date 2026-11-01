@@ -10,22 +10,16 @@ import (
 // transition 只用于初始化或未收尾实例的实际推进；重复事件在 Advance 中直接返回。
 func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 	result := view(instance)
-	previousMode := pb.Mode_MODE_UNSPECIFIED
-	if previous != nil {
-		previousMode = previous.Mode
-	}
+	modeChanged := previous == nil || previous.Mode != instance.Mode
 
-	command := func(i int, kind pb.CommandKind, previousPhase pb.Phase) *pb.Command {
+	command := func(i int, kind pb.CommandKind) *pb.Command {
 		return &pb.Command{
 			InstanceId:     instance.Id,
 			DefinitionHash: w.hash,
 			Revision:       instance.Revision,
 			Kind:           kind,
 			State:          proto.Clone(instance.Nodes[i]).(*pb.NodeState),
-			PreviousPhase:  previousPhase,
 			Mode:           instance.Mode,
-			PreviousMode:   previousMode,
-			Path:           w.path(i),
 		}
 	}
 
@@ -35,8 +29,8 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 			before = previous.Nodes[i].Phase
 		}
 		// 结果与决策随阶段一次写入，只有根控制通知可以保持原阶段。
-		if state.Phase != before || (i == 0 && previousMode != instance.Mode) {
-			notification := command(i, pb.CommandKind_COMMAND_KIND_STATE, before)
+		if state.Phase != before || (i == 0 && modeChanged) {
+			notification := command(i, pb.CommandKind_COMMAND_KIND_STATE)
 			notification.Id = stableID("state", instance.Id, state.NodeId, strconv.FormatUint(instance.Revision, 10))
 			result.Commands = append(result.Commands, notification)
 		}
@@ -44,7 +38,7 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 
 	for i, state := range instance.Nodes {
 		if state.Phase == ready && (previous == nil || previous.Nodes[i].Phase == pending) {
-			dispatch := command(i, pb.CommandKind_COMMAND_KIND_TASK, pending)
+			dispatch := command(i, pb.CommandKind_COMMAND_KIND_TASK)
 			dispatch.Id = state.ExecutionId
 			dispatch.Task = proto.Clone(w.nodes[i].Node).(*pb.Node)
 			result.Commands = append(result.Commands, dispatch)
@@ -52,7 +46,7 @@ func (w *Workflow) transition(previous, instance *pb.Instance) *pb.Transition {
 	}
 
 	if result.Settled && previous != nil {
-		end := command(0, pb.CommandKind_COMMAND_KIND_END, previous.Nodes[0].Phase)
+		end := command(0, pb.CommandKind_COMMAND_KIND_END)
 		end.Id = stableID("end", instance.Id)
 		result.Commands = append(result.Commands, end)
 	}
@@ -68,8 +62,7 @@ func validCommand(command *pb.Command) bool {
 
 	state := command.State
 	if state.NodeId == "" || state.Phase < pending || state.Phase > skipped ||
-		command.Mode < modeRunning || command.Mode > modeStopped ||
-		len(command.Path) == 0 || command.Path[len(command.Path)-1] != state.NodeId {
+		command.Mode < modeRunning || command.Mode > modeStopped {
 		return false
 	}
 
@@ -82,7 +75,7 @@ func validCommand(command *pb.Command) bool {
 		return command.Task == nil &&
 			command.Id == stableID("state", command.InstanceId, state.NodeId, strconv.FormatUint(command.Revision, 10))
 	case pb.CommandKind_COMMAND_KIND_END:
-		return command.Task == nil && len(command.Path) == 1 && terminal(state.Phase) &&
+		return command.Task == nil && terminal(state.Phase) &&
 			command.Id == stableID("end", command.InstanceId)
 	}
 

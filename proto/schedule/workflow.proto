@@ -82,7 +82,7 @@ message Event {
 }
 
 // 自包含、可持久化的执行或通知意图。接入方按 id 幂等投递。
-// STATE 包含节点状态变化或根的控制模式变化；END 只在首次全部收尾时产生。
+// STATE 通知节点或根控制模式变化后的当前状态；END 只在首次全部收尾时产生。
 message Command {
   string id = 1;
   string instance_id = 2;
@@ -90,10 +90,7 @@ message Command {
   uint64 revision = 4;
   CommandKind kind = 5;
   NodeState state = 6;
-  Phase previous_phase = 7;
   Mode mode = 8;
-  Mode previous_mode = 9;
-  repeated string path = 10;
   // 只有 TASK 命令包含叶子定义，通知无需重新装载整棵树。
   Node task = 11;
 }
