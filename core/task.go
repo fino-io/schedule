@@ -71,6 +71,7 @@ func Append(parent *pb.Node, children ...*pb.Node) error {
 	if parent == nil || (parent.Kind != seq && parent.Kind != all && parent.Kind != any) {
 		return fmt.Errorf("%w: parent must be a combination", ErrInvalidDefinition)
 	}
+
 	for _, child := range children {
 		if child == nil || child == parent {
 			return fmt.Errorf("%w: nil child or direct self-reference", ErrInvalidDefinition)

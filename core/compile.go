@@ -32,13 +32,16 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 		if node == nil || node.Id == "" {
 			return fmt.Errorf("%w: node and ID are required", ErrInvalidDefinition)
 		}
+
 		if depth > maxDepth || len(ids) >= maxNodes {
 			return fmt.Errorf("%w: tree exceeds depth %d or node count %d", ErrInvalidDefinition, maxDepth, maxNodes)
 		}
+
 		// 共享节点和循环都会再次遇到同一个 ID，无须单独维护指针集合。
 		if ids[node.Id] {
 			return fmt.Errorf("%w: shared, cyclic or duplicate node %q", ErrInvalidDefinition, node.Id)
 		}
+
 		if node.Kind < task || node.Kind > any || (node.Kind == task) != (len(node.Children) == 0) {
 			return fmt.Errorf("%w: invalid kind or children of %q", ErrInvalidDefinition, node.Id)
 		}
@@ -65,6 +68,7 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidDefinition, err)
 	}
+
 	digest := sha256.Sum256(data)
 	w.hash = hex.EncodeToString(digest[:])
 
@@ -83,6 +87,7 @@ func Compile(definition *pb.Definition) (*Workflow, error) {
 
 		return i
 	}
+
 	index(w.definition.Root, -1)
 
 	return w, nil

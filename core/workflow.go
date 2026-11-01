@@ -46,6 +46,7 @@ func (w *Workflow) Advance(instance *pb.Instance, event *pb.Event) (*pb.Transiti
 	if err := w.validate(instance); err != nil {
 		return nil, err
 	}
+
 	if event == nil || event.Id == "" || event.InstanceId != instance.Id ||
 		!validText(event.Id, event.ResultRef, event.GetErrorMessage()) {
 		return nil, fmt.Errorf("%w: event ID or instance binding", ErrInvalidEvent)

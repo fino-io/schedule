@@ -22,6 +22,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 				}
 				return
 			}
+
 			if !allowed {
 				return
 			}
@@ -33,6 +34,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 				state.Phase = running
 			}
 		}
+
 		if node.Kind == task || state.Phase == skipped {
 			return
 		}
@@ -40,6 +42,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 		if instance.Mode == modeStopped && !terminal(state.Phase) {
 			state.Phase, state.CauseId = stopped, w.nodes[0].Id
 		}
+
 		if blocker == "" && (state.Phase == failed || state.Phase == stopped) {
 			blocker = node.Id
 		}
@@ -54,6 +57,7 @@ func (w *Workflow) reconcile(instance *pb.Instance) {
 
 		w.resolve(instance, i, -1)
 	}
+
 	visit(0, instance.Mode == modeRunning, "")
 }
 
